@@ -15,7 +15,7 @@ Djangoの基本的な処理に関わるモジュールの役割を知り、文�
 
 ## Hello Worldまでの道のり
 
-Hello Worldを題材に、Djangoでアプリケーションをつくるときの大まかな流れを見ていきます。 シンプルなアプリとはいえ、Django特有のものをいくつか扱うことになります。ですので、まずはざっくりと全体像を掴むことから始めます。
+Hello Worldを題材に、Djangoでアプリケーションをつくるときの大まかな流れを見ていきます。 Hello Worldとはいえ、Django特有のものをいくつか扱うことになります。ですので、まずはざっくりと全体像を掴むことから始めます。
 
 ### 処理フロー
 
@@ -33,7 +33,7 @@ Hello Worldを題材に、Djangoでアプリケーションをつくるときの
 最初に、`プロジェクト`というアプリケーション全体の設定値などを格納したPythonパッケージをつくります。 続いて、プロジェクトの中にアプリケーションを動作させる上で必要なモジュール群をつくっていきます。Djangoでは、これを`アプリケーション`と呼びます。
 ここで、つくる対象のアプリケーションと、Djangoの用語としてのアプリケーションが混ざってしまいそうですね。 後者のアプリケーションは公式でappと記述されているようなので、これからappと表現することにします。
 
-簡単にまとめると、Djangoのアプリケーション開発は、プロジェクトという大枠・少し小さくなったappという骨組みへ、機能を肉付けすることで進めていくことになります。
+簡単にまとめると、Djangoのアプリケーション開発は、プロジェクトという大枠・少し小さくなったappという骨組みへ機能を肉付けすることで進めていくことになります。
 
 ### viewとURLconf
 
@@ -165,12 +165,15 @@ HTTPリクエストからHTTPレスポンスをつくり出すviewを記述す�
 
 ```bash
 $ python manage.py runserver
+# 出力
 Watching for file changes with StatReloader
 Performing system checks...
 
 System check identified no issues (0 silenced).
 
+# 警告 今は気にしなくてOK
 You have 18 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): admin, auth, contenttypes, sessions.
+
 Run 'python manage.py migrate' to apply them.
 January 15, 2022 - 14:47:17
 Django version 4.0.1, using settings 'config.settings'
@@ -178,7 +181,8 @@ Starting development server at http://127.0.0.1:8000/
 Quit the server with CONTROL-C.
 ```
 
-警告が表示されましたが、これはデータベースを扱うようになったとき、解消していきます。 コマンドは、言葉で表現すると`引数にrunserverを指定したmanage.pyをPythonインタプリタで実行した`となります。
+警告が表示されましたが、これはデータベースを扱うようになったときに解消していきます。
+コマンドは、言葉で表現すると`引数にrunserverを指定したmanage.pyをPythonインタプリタで実行した`となります。
 [参考](https://docs.djangoproject.com/en/4.0/intro/tutorial01/#the-development-server)
 
 末尾に表示されている通り、`http://127.0.0.1:8000/`へアクセスすることで、開発サーバが動いているか見ることができます。
@@ -235,7 +239,7 @@ def hello_world(request: HttpRequest) -> HttpResponse:
     return HttpResponse('Hello World')
 ```
 
-関数を眺めていると、最初に書いたviewの役割と対応していることが分かります。view関数はHttpRequestを引数に受け取り、戻り値としてHttpResponseを返却しています。これはまさにHTTPのやり取りを表現していると言えます。
+関数を眺めていると、viewの役割と対応していることが分かります。view関数はHttpRequestを引数に受け取り、戻り値としてHttpResponseオブジェクトを返却しています。これはまさにHTTPのやり取りを表現していると言えます。
 また、DjangoはHttpResponseオブジェクトを文字列で初期化すると、HTTPレスポンスのボディへ文字列を設定してくれます。
 [参考](https://docs.djangoproject.com/en/4.0/ref/request-response/#passing-strings)
 
@@ -274,14 +278,14 @@ urlpatterns = [
 ]
 ```
 
-ここで、URLとviewの対応付けは`path()`により実現されます。第一引数にURL・第二引数をviewを表現する関数「オブジェクト」を設定します。
+ここで、URLとviewの対応付けは`path()`により実現されます。第一引数にURL・第二引数にviewを表現する関数「オブジェクト」を設定します。
 [参考](https://docs.djangoproject.com/en/4.0/ref/urls/#path)
 
 #### 補足: なぜプロジェクトディレクトリ・appでURLconfを分けるのか
 
 URLと対応するview定義は、一箇所にまとまっていた方が管理しやすいように思えます。なぜわざわざ分ける必要があるのでしょうか。
 一言で表現するなら、プロジェクトディレクトリが持つappの知識を最小限にするためです。少し抽象的になったのでもう少し詳しく見てみましょう。
-例えば、`/article/`で始まるURLはarticle appで処理することで各処理に`/article/`と書く必要が無くなることでしょうか。こうすればプロジェクトディレクトリでは、`/article/`以下のURLへのリクエストはarticle appがよしなに処理してくれることを期待できます。
+例えば、`/article/`で始まるURLはarticle appで処理することで各処理に`/article/`と書く必要が無くなります。こうすればプロジェクトディレクトリでは、`/article/`以下のURLへのリクエストはarticle appがよしなに処理してくれることを期待できます。
 更に、article appでviewを対応づけることで、プロジェクトディレクトリでappのviewをimportするようなことがなくなります。
 
 このように、URLconfを分けておけば、クラスが責務を分割するようにURL管理を分業しながらシンプルに保つことができるのです。
@@ -291,7 +295,7 @@ URLと対応するview定義は、一箇所にまとまっていた方が管理�
 
 ## いざ、Hello World
 
-これで準備は整ったので、いよいよHello Worldを動かすときがきました。もう一度開発サーバを起動し、`http://127.0.0.1:8000/`へアクセスしてみましょう。
+これで準備は整ったので、いよいよHello Worldを試すときがきました。もう一度開発サーバを起動し、`http://127.0.0.1:8000/`へアクセスしてみましょう。
 
 ![image](https://user-images.githubusercontent.com/43694794/150127695-70748ab8-c14b-4934-92f0-8d3c5232c1fc.png)
 
