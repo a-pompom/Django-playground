@@ -4,7 +4,6 @@ from django.http.response import HttpResponse
 from django.test.client import Client
 from django.urls import reverse
 
-from fortune_telling.urls import app_name
 from fortune_telling import fortune
 
 
@@ -15,7 +14,7 @@ class TestIndex:
     def test_status_code(self):
         # GIVEN
         client = Client()
-        request_name = f'{app_name}:index'
+        request_name = f'おみくじ:トップ'
         # WHEN
         actual = client.get(reverse(request_name))
         # THEN
@@ -29,7 +28,7 @@ class TestFortuneTelling:
     def test_status_code(self):
         # GIVEN
         client = Client()
-        request_name = f'{app_name}:fortune_telling'
+        request_name = f'おみくじ:結果'
         # WHEN
         actual: HttpResponse = client.get(reverse(request_name))
         # THEN
@@ -39,7 +38,7 @@ class TestFortuneTelling:
     def test_context(self):
         # GIVEN
         client = Client()
-        request_name = f'{app_name}:fortune_telling'
+        request_name = f'おみくじ:結果'
         context_key_of_fortune = 'fortune'
         # WHEN
         actual: HttpResponse = client.get(reverse(request_name))
@@ -51,7 +50,7 @@ class TestFortuneTelling:
     def test_context_fortune(self, monkeypatch: MonkeyPatch):
         # GIVEN
         client = Client()
-        request_name = f'{app_name}:fortune_telling'
+        request_name = f'おみくじ:結果'
         context_key_of_fortune = 'fortune'
         expected_fortune = '大吉'
         monkeypatch.setattr(fortune, 'tell_fortune', lambda: expected_fortune)
