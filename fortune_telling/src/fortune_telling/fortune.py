@@ -1,6 +1,6 @@
 import random
 
-FORTUNE_CANDIDATE = ['小吉', '中吉', '大吉']
+FORTUNE_CANDIDATE = ('小吉', '中吉', '大吉')
 
 
 def tell_fortune() -> str:

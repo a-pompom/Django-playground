@@ -2,8 +2,8 @@ from django.urls import path
 
 from .views import index, fortune_telling
 
-app_name = 'fortune_telling'
+app_name = 'おみくじ'
 urlpatterns = [
-    path('', index, name='index'),
-    path('fortune_telling/', fortune_telling, name='fortune_telling')
+    path('', index, name='トップ'),
+    path('fortune_telling/', fortune_telling, name='結果')
 ]

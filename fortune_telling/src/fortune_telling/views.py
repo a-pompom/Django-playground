@@ -1,7 +1,7 @@
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import render
+from django.template.loader import render_to_string
 
-from .fortune import tell_fortune
+from . import fortune as fortune_module
 
 
 def index(request: HttpRequest) -> HttpResponse:
@@ -11,7 +11,7 @@ def index(request: HttpRequest) -> HttpResponse:
     :param request: HTTPリクエスト
     :return: トップ画面をボディに持つHTTPレスポンス
     """
-    return render(request, 'index.html')
+    return HttpResponse(render_to_string('index.html'))
 
 
 def fortune_telling(request: HttpRequest) -> HttpResponse:
@@ -21,9 +21,9 @@ def fortune_telling(request: HttpRequest) -> HttpResponse:
     :param request: HTTPリクエスト
     :return: おみくじ結果画面をボディに持つHTTPレスポンス
     """
-    fortune = tell_fortune()
+    fortune = fortune_module.tell_fortune()
     context = {
         'fortune': fortune
     }
 
-    return render(request, 'fortune.html', context)
+    return HttpResponse(render_to_string('fortune.html', context=context))
