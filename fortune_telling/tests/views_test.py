@@ -14,11 +14,23 @@ class TestIndex:
     def test_status_code(self):
         # GIVEN
         client = Client()
-        request_name = f'おみくじ:トップ'
+        named_url = 'おみくじ:トップ'
         # WHEN
-        actual = client.get(reverse(request_name))
+        actual = client.get(reverse(named_url))
         # THEN
         assert actual.status_code == 200
+
+    # トップ画面のテンプレートを参照しているか
+    def test_use_index_template(self):
+        # GIVEN
+        client = Client()
+        named_url = 'おみくじ:トップ'
+        expected = 'index.html'
+        # WHEN
+        response = client.get(reverse(named_url))
+        actual = response.templates[0].name
+        # THEN
+        assert actual == expected
 
 
 class TestFortuneTelling:
@@ -28,35 +40,47 @@ class TestFortuneTelling:
     def test_status_code(self):
         # GIVEN
         client = Client()
-        request_name = f'おみくじ:結果'
+        named_url = 'おみくじ:結果'
         # WHEN
-        actual: HttpResponse = client.get(reverse(request_name))
+        actual: HttpResponse = client.get(reverse(named_url))
         # THEN
         assert actual.status_code == 200
+
+    # 結果画面のテンプレートを参照しているか
+    def test_use_result_template(self):
+        # GIVEN
+        client = Client()
+        named_url = 'おみくじ:結果'
+        expected = 'fortune.html'
+        # WHEN
+        response = client.get(reverse(named_url))
+        actual = response.templates[0].name
+        # THEN
+        assert actual == expected
 
     # HTMLを組み立てるコンテキストオブジェクトが存在するか
     def test_context(self):
         # GIVEN
         client = Client()
-        request_name = f'おみくじ:結果'
+        named_url = 'おみくじ:結果'
         context_key_of_fortune = 'fortune'
         # WHEN
-        actual: HttpResponse = client.get(reverse(request_name))
-        context: dict = getattr(actual, 'context')
+        response = client.get(reverse(named_url))
+        actual = response.context.get(context_key_of_fortune, None)
         # THEN
-        assert context.get(context_key_of_fortune, None) is not None
+        assert actual is not None
 
     # コンテキストの運勢要素は関数から生成されたか
     def test_context_fortune(self, monkeypatch: MonkeyPatch):
         # GIVEN
         client = Client()
-        request_name = f'おみくじ:結果'
+        named_url = 'おみくじ:結果'
         context_key_of_fortune = 'fortune'
-        expected_fortune = '大吉'
-        monkeypatch.setattr(fortune, 'tell_fortune', lambda: expected_fortune)
+        expected = '大吉'
+        monkeypatch.setattr(fortune, 'tell_fortune', lambda: expected)
 
         # WHEN
-        actual: HttpResponse = client.get(reverse(request_name))
-        context: dict = getattr(actual, 'context')
+        response = client.get(reverse(named_url))
+        actual = response.context.get(context_key_of_fortune, None)
         # THEN
-        assert context.get(context_key_of_fortune, None) == expected_fortune
+        assert actual == expected
