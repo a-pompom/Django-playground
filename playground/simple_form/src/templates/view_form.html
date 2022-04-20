@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<head>
+    <meta charset="UTF-8">
+    <title>View Form</title>
+</head>
+<body>
+<div>
+    <h1>View Form</h1>
+    <form method="post" action="{% url 'form:view_post' %}">
+        {% csrf_token %}
+        <label for="text">Text</label>
+        <input 
+            type="text"
+            name="{{ form.text.name }}"
+            placeholder="text"
+            id="text">
+
+        <hr>
+
+        <p>CheckBox</p>
+        {% for name, value in form.checkbox.field.choices %}
+            <label for="checkbox{{ value }}">{{ value }}</label>
+            <input
+                type="checkbox"
+                name="{{ form.checkbox.name }}"
+                value="{{ name }}"
+                id="checkbox{{ value }}">
+        {% endfor %}
+        <hr>
+
+        <p>Radio</p>
+        {% for name, value in form.radio.field.choices %}
+            <label for="radio{{ value }}">{{ value }}</label>
+            <input
+                type="radio"
+                name="{{ form.radio.name }}"
+                value="{{ value }}"
+                id="radio{{ value }}">
+        {% endfor %}
+
+        <hr>
+
+        <p>Select</p>
+        <select name="{{ form.select.name }}">
+        {% for name, value in form.select.field.choices %}
+            <option value="{{ name }}">{{ value }}</option>
+        {% endfor %}
+        </select>
+
+        <hr>
+
+        <input type="submit" value="Submit">
+
+    </form>
+</div>
+</body>
+</html>

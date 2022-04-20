@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<head>
+    <meta charset="UTF-8">
+    <title>Raw Form</title>
+</head>
+<body>
+<div>
+    <h1>Raw Form</h1>
+    <form method="post" action="{% url 'form:raw_post' %}">
+        {% csrf_token %}
+        <label for="text">Text</label>
+        <input type="text" name="text" placeholder="text" id="text">
+        
+        <hr>
+        
+        <p>CheckBox</p>
+        <label for="checkboxDog">Dog</label>
+        <input type="checkbox" name="checkbox" value="dog" id="checkboxDog">
+        <label for="checkboxCat">Cat</label>
+        <input type="checkbox" name="checkbox" value="cat" id="checkboxCat">
+        <label for="checkboxRabbit">Rabbit</label>
+        <input type="checkbox" name="checkbox" value="rabbit" id="checkboxRabbit">
+        
+        <hr>
+        
+        <p>Radio</p>
+        <label for="radioRice">Rice</label>
+        <input type="radio" name="radio" value="rice" id="radioRice">
+        <label for="radioBread">Bread</label>
+        <input type="radio" name="radio" value="bread" id="radioBread">
+        
+        <hr>
+        
+        <p>Select</p>
+        <select name="select">
+            <option value="りんご">りんご</option>
+            <option value="ばなな">ばなな</option>
+            <option value="ぶどう">ぶどう</option>
+            <option value="らいち">らいち</option>
+        </select>
+        
+        <hr>
+        
+        <input type="submit" value="Submit">
+        
+    </form>
+</div>
+</body>
+</html>

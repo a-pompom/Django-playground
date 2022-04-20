@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<head>
+    <meta charset="UTF-8">
+    <title>View Form Result</title>
+</head>
+<body>
+<div>
+    <h1>View Form Result</h1>
+    <h4>Text</h4>
+    <p>{{ form.text.value }}</p>
+
+    <hr>
+
+    <h4>CheckBox</h4>
+    {% for value in form.checkbox.value %}
+        <p>{{ value }}</p>
+    {% endfor %}
+
+    <hr>
+
+    <h4>Radio</h4>
+    <p>{{ form.radio.value }}</p>
+
+    <hr>
+
+    <h4>Select</h4>
+    <p>{{ form.select.value }}</p>
+</div>
+</body>
+</html>
