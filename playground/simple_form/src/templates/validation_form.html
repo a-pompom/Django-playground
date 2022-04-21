@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<head>
+    <meta charset="UTF-8">
+    <title>Validation Form</title>
+</head>
+<body>
+<div>
+    <h1>Validation Form</h1>
+    <form method="post" action="{% url 'form:validation_post' %}">
+        {% csrf_token %}
+        <label for="username">Username</label>
+        <input
+            type="text"
+            name="{{ form.username.name }}"
+            value="{{ form.username.value|default_if_none:'' }}"
+            placeholder="username"
+            id="username">
+        {% for error in form.username.errors %}
+            <span style="color: red;">{{ error }}</span>
+        {% endfor %}
+
+        <hr>
+
+        <label for="userId">UserId</label>
+        <input
+            type="text"
+            name="{{ form.user_id.name }}"
+            value="{{ form.user_id.value|default_if_none:'' }}"
+            placeholder="userId"
+            id="userId">
+        {% for error in form.user_id.errors %}
+            <span style="color: red;">{{ error }}</span>
+        {% endfor %}
+        <hr>
+        
+        <input type="submit" value="Submit">
+    </form>
+</div>
+</body>
+</html>
