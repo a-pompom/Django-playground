@@ -21,14 +21,14 @@
 
         <hr>
 
-        <label for="userId">UserId</label>
+        <label for="password">Password</label>
         <input
-            type="text"
-            name="{{ form.user_id.name }}"
-            value="{{ form.user_id.value|default_if_none:'' }}"
-            placeholder="userId"
-            id="userId">
-        {% for error in form.user_id.errors %}
+            type="password"
+            name="{{ form.password.name }}"
+            value="{{ form.password.value|default_if_none:'' }}"
+            placeholder="password"
+            id="password">
+        {% for error in form.password.errors %}
             <span style="color: red;">{{ error }}</span>
         {% endfor %}
         <hr>
