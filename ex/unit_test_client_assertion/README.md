@@ -8,6 +8,7 @@
 
 概要を知るだけでは少し物足りないので、ある程度理解できたらDjango + pytestでテストコードを少しだけ書きやすくなるような仕組みがつくれないか考えてみます。より具体的には、`django.test.testcases.SimpleTestCase`のような書き味でテンプレート・コンテキストを検証するテストコードを書けるよう、fixtureを定義してみます。
 
+
 ## 目次
 
 [toc]
@@ -79,7 +80,7 @@ def test_something(self):
 さて、ここではDjango本体の実装をいくつか見ていきます。すべてのコードを紹介するとすさまじい文量になってしまうので、ここでは流れを掴める程度につまみ食いしていきます。
 言い換えると、今回の目的である「Clientが返却するレスポンスへどのようにテンプレート・コンテキストを設定しているのか」に関わる処理を中心に見ていきます。
 
-※ 以降で見るDjangoのコードは、[4.0](https://github.com/django/django/tree/4.0)のものを対象としています。
+※ 以降で見るDjangoのコードは、[バージョン4.0](https://github.com/django/django/tree/4.0)のものを対象としています。
 
 ### `django.test.client.Client`
 
@@ -256,7 +257,7 @@ class ClientHandler(BaseHandler):
         response = self.get_response(request)
 ```
 
-※ `BaseHandler.get_response()`はDjango本体の処理でテストコードとは離れてしまうので、出力だけを見ておきます。
+※ `BaseHandler.get_response()`はテストコードとは離れてしまうので、出力だけを見ておきます。
 
 テストのために色々と処理は書かれていますが、どうやらレスポンスそのものはDjango本体の処理からつくり出されているようです。
 より具体的には、`self.get_response()`から、`<HttpResponse status_code=200, "text/html; charset=utf-8">`のようなHttpResponseオブジェクトがつくられています。
@@ -292,30 +293,377 @@ class Client(ClientMixin, RequestFactory):
         response.context = data.get('context')
 ```
 
-こうして見ると、レスポンスのテンプレートとコンテキストは、`data`という辞書に設定されたものを見に行っているようです。
-ということは、辞書`data`に関わる処理をたどっていけば、テンプレート・コンテキストの実際に指すものが理解できそうです。
+こうして見ると、レスポンスのテンプレートとコンテキストは、辞書`data`に設定されたものを見に行っているようです。
+ということは、辞書`data`に関わる処理をたどっていけば、テンプレート・コンテキストの中身が理解できそうです。
 
 数行程度の処理でも中身は中々に複雑なので、じっくりと追っていきましょう。
 
 #### partial
 
-
-
-[参考](https://docs.python.org/3/library/functools.html#functools.partial)
-
 ```Python
+# Curry a data dictionary into an instance of the template renderer
+# callback function.
+data = {}
 on_template_render = partial(store_rendered_templates, data)
 ```
 
+dataを操作する処理は、`partial()`でpartial objectをつくるところから始まります。
+
+[参考](https://docs.python.org/3/library/functools.html#functools.partial)
+
+つくられたオブジェクトは、`store_rendered_templates()`と呼ばれる関数の第一引数をdataに固定した関数を表現しています。
+これを他の関数の引数に渡すことで、`store_rendered_templates()`を呼び出したときにdataを書き換えられるようになります。
+
+少しイメージしづらいですが、一連の処理の流れが掴めれば、このように書く理由も見えてくるはずです。
+
+#### store_rendered_templates
+
+いかにもテンプレートを保存していそうな処理`store_rendered_templates`を見てみます。
+
+```Python
+# django.test.client.py
+# レンダリングで利用されたテンプレート・コンテキスト情報を保存する
+def store_rendered_templates(store, signal, sender, template, context, **kwargs):
+    """
+    Store templates and contexts that are rendered.
+
+    The context is copied so that it is an accurate representation at the time
+    of rendering.
+    """
+    
+    # store引数は、Client.request()で見ていた辞書dataと対応
+    # この場でstore引数を書き換えることで、辞書dataもあわせて変更される
+    
+    # 引数から受け取ったtemplate, contextを辞書dataへ設定
+    store.setdefault('templates', []).append(template)
+    if 'context' not in store:
+        store['context'] = ContextList()
+    store['context'].append(copy(context))
+```
+
+先ほども見た通り、第一引数は辞書dataに固定されていることから、関数の中で書き換えられた内容も`Client.request()`内部の処理へ反映されます。
+つまり、この関数を通じてテンプレートやコンテキストが設定されているようです。
+型などを詳しく見ていけば`Client.request()`の返すものも分かってきそうですが、1つ大きな問題があることから、一旦保留にしておきます。
+
+テンプレート・コンテキストの実体を知る上で課題となるのは、`store_rendered_templates()`がいつ・どのように呼び出されるか見えづらいことです。
+
+### signals
+
+テンプレート・コンテキストを設定する処理がいつ呼ばれるか理解するには、Djangoのsignalを知っておかなければなりません。
+signalはざっくり表現すると、あるイベント、例えばDjangoがリクエストを処理し始めたとき・Modelを登録したときなどを契機に通知を送るための仕組みです。
+
+[参考](https://docs.djangoproject.com/en/4.0/topics/signals/)
+
+通知内容は、receiverなるコールバック関数によって検知されます。
+これだけではイメージしづらいので、`Client.request()`でsignalを扱っている処理を見てみましょう。
+
+```Python
+data = {}
+on_template_render = partial(store_rendered_templates, data)
+
+signals.template_rendered.connect(on_template_render, dispatch_uid=signal_uid)
+```
+
+この処理を通じて、signalがどのようなものか・何をしているのか読み解いていきます。
+
+#### `signals.template_rendered.connect()`
+
+最初に、`signals.template_rendered.connect()`がどのオブジェクトのメソッドを指しているのか、整理しておきます。
+これは参照している変数を順にたどれば良く、実体はDjangoが用意しているSignalオブジェクトです。
+
+[参考](https://docs.djangoproject.com/en/4.0/topics/signals/#django.dispatch.Signal)
+
+```Python
+# django.test.client.py
+# 中略...
+# signalsはdjango.test.signalsモジュールを参照
+from django.test import signals
+```
+
+```Python
+# django.test.signals.py
+# 中略...
+# Djangoが用意しているSignalクラス
+from django.dispatch import Signal, receiver
+
+# signals.template_renderedはSignalオブジェクトを指す
+# 中略...
+template_rendered = Signal()
+```
+
+つまり、`signals.template_rendered.connect()`は、`Signal.connect()`と言い換えることができます。
+
+#### `Signal.connect()`
+
+早速概要をドキュメントから見てみましょう。
+
+[参考](https://docs.djangoproject.com/en/4.0/topics/signals/#django.dispatch.Signal.connect)
+
+> 記法: `Signal.connect(receiver, sender=None, weak=True, dispatch_uid=None)`
+
+receiverはコールバック関数で、signalを契機に発火します。
+`Signal.connect()`でreceiverを登録しておくと、何かしらのタイミングでsignalが通知されたときにテンプレート・コンテキストを保存する`store_rendered_template()`が呼び出されます。
+
+#### `Signal.send()`
+
+signalが通知される何かしらのタイミングとは、`Signal.send()`が呼び出されたときを指します。文字通りsignal(合図)が送られることを意味しています。
+コード上では、`template_rendered.send()`が呼ばれると、`store_rendered_template()`が発火します。
+
+もう少しイメージを深めるために、`Signal.send()`の記法も見ておきましょう。
+
+[参考](https://docs.djangoproject.com/en/4.0/topics/signals/#sending-signals)
+
+> 記法: `Signal.send(sender, **kwargs)`
+
+senderは、なんらかのクラスのインスタンスであることが多いです。更に、キーワード引数も渡すことができるようです。
+ここで、`store_rendered_templates()`のシグネチャを改めて確認してみます。
+
+```Python
+def store_rendered_templates(store, signal, sender, template, context, **kwargs):
+```
+
+どうやら、`Signal.send()`のキーワード引数から、テンプレート・コンテキストの情報を受け取っているようです。
+つまり、`template_rendered.send()`を呼び出すときに渡しているものを見れば、テンプレート・コンテキストの正体に近づけそうです。
 
 
-テンプレートが描画されたシグナルで設定 シグナルのハンドラでテンプレート・コンテキストを設定。 ハンドラでは、templateが描画されるたびにテンプレート・コンテキストを追加
+#### `instrumented_test_render()`
 
-#### signals
+`template_rendered.send()`がいつ・どのように呼ばれるのか段階的に見ていきたいところではあります。
+しかし、signalはその性質上どこでも通知することができるので、これまでのようにある処理から順を追って見ていてもsignalを送っているところにたどり着くのは困難です。
+
+よって、正攻法とは言いがたいですが、Django本体のソース全体を`template_rendered.send`で検索します。
+こうすることで、どこからでも送ることのできるsignalが発火した場所を知ることができます。実際に呼び出しているところを見てみましょう。
+
+```Python
+# django.test.utils.py
+
+# Templateのレンダリング処理へ介入するための処理
+def instrumented_test_render(self, context):
+    """
+    An instrumented Template render method, providing a signal that can be
+    intercepted by the test Client.
+    """
+    template_rendered.send(sender=self, template=self, context=context)
+    
+    # self.nodelist.render()はDjangoがテンプレートを描画する処理の一部
+    return self.nodelist.render(context)
+```
+
+何やらどこかのクラスのメソッドっぽい処理へ行き着きました。
+しかし、これは関数として定義されているので、見ただけでは引数`self`と対応するものは分かりません。
+
+入り口として見ていた`Client.request()`からは離れてしまいましたが、この処理がどのように呼ばれるか紐解いていけばゴールも見えてきそうです。
+早速呼び出している処理を見てみましょう。
+
+#### `setup_test_environment()`
+
+`instrumented_test_render()`は、同ファイルの`setup_test_environment()`なる処理が参照しているようです。
+
+[参考](https://docs.djangoproject.com/en/4.0/topics/testing/advanced/#django.test.runner.DiscoverRunner.setup_test_environment)
+
+```Python
+# django.test.utils.py
+# Djangoでテストコードを実行するときに前処理として呼ばれる処理
+def setup_test_environment(debug=None):
+    """
+    Perform global pre-test setup, such as installing the instrumented template
+    renderer and setting the email backend to the locmem email backend.
+    """
+    
+    # 中略...
+    
+    # Templateクラスの_renderメソッドを上書き
+    Template._render = instrumented_test_render
+```
+
+中身に入る前に、どのタイミングでこの処理が発火するのか概略を見ておきます。
+本来は、Django標準のテストランナー(manage.py testコマンドでテストを実行してくれるもの)から呼ばれます。
+ですが、Django + pytestでテストコードを動かすときは、前処理として明示的に呼び出すか、pytest-djangoなどのライブラリを導入する必要があります。
+
+※ pytest-djangoでは当該処理を前処理として呼び出すfixtureが定義されています。
+
+---
+
+`setup_test_environment()`がテストの前処理の役割を持つことが理解できたところで、`instrumented_test_runner()`を参照している処理を見てみます。
+
+```Python
+Template._render = instrumented_test_render
+```
+
+Djangoのテンプレートを表現するTemplateクラスの`_render()`属性を上書きしています。
+このように書いた理由は、Djangoがテンプレートをレンダリングしている処理にテストで介入するためです。
+
+言い換えれば、テストコードにおいて、Djangoがテンプレートを描画する処理は次のように動作します。
+
+* 描画時点のテンプレート・コンテキスト情報をもとにsignal template_renderedを送信
+* Djangoがテンプレートをレンダリング
+
+テンプレートをレンダリングする度に、その時点でのテンプレート・コンテキストの情報を保存しておけば、とてもテストがしやすくなります。
+HTTPレスポンスに含まれるHTMLなどの結果ではなく、過程のテンプレートやコンテキストをもとに期待値を定義できるのです。
 
 ### Template
 
-`django.template.base.Template`
+いかにもな名前のTemplateクラスを追っていきます。おそらく、このクラス自身にはテンプレートの情報が、そして、このクラスに定義されたレンダリング処理にはコンテキストの情報が書かれるはずです。
+それが分かればついにゴールへたどり着けそうです。とはいえテストコードとはどんどん離れてきたので、要点をつまむ程度に見ていくことにします。
+
+まずはクラスの概要をざっと見てみます。
+
+```Python
+# django.template.base.Template
+
+class Template:
+    def __init__(self, template_string, origin=None, name=None, engine=None):
+        # 中略
+        # テンプレートそのものの情報を設定
+        # name属性は多くの場合、テンプレートのファイル名が指定される
+        self.name = name
+        self.origin = origin
+        self.engine = engine
+        self.source = str(template_string)  # May be lazy.
+        self.nodelist = self.compile_nodelist()
+        
+    # 上書きされた処理
+    # 処理を呼び出す前に自身の情報と引数のコンテキストと共にsignalを送信
+    def _render(self, context):
+        return self.nodelist.render(context)
+
+    # _renderの呼び出し元
+    def render(self, context):
+        "Display stage -- can be called many times"
+        with context.render_context.push_state(self):
+            if context.template is None:
+                with context.bind_template(self):
+                    context.template_name = self.name
+                    return self._render(context)
+            else:
+                return self._render(context)
+```
+
+ここでのname属性は、テストコードを書くときに期待値としている、レンダリングされたテンプレート名(例: index.html)を表現しています。
+そして、`Template.render()`さえ押さえてしまえば、コンテキストの中身も掴めそうです。
+
+#### Template.renderはどのように呼ばれるか
+
+`Template.render()`を呼び出している処理をさらっと追っていきます。あまり深くまで入り込むと戻ってこられなくなりそうなので、おもてから見える表面的な部分から重要なところを抜き出してみます。
+例として、テンプレートのレンダリング結果をHTTPレスポンスとして設定しているviewの処理を見てみます。
+
+```Python
+def fortune_telling(request: HttpRequest) -> HttpResponse:
+    """
+    おみくじ結果画面表示
+
+    :param request: HTTPリクエスト
+    :return: おみくじ結果画面をボディに持つHTTPレスポンス
+    """
+    fortune = fortune_module.tell_fortune()
+    context = {
+        'fortune': fortune
+    }
+
+    # render_to_string()でテンプレートを文字列へ
+    return HttpResponse(render_to_string('fortune.html', context=context))
+```
+
+コンテキストをもとにテンプレートをレンダリングする処理`render_to_string()`へ指定したテンプレートはどのように渡されるのでしょうか。
+少しだけ潜ってみましょう。
+
+```Python
+# django.template.loader.py
+def render_to_string(template_name, context=None, request=None, using=None):
+    """
+    Load a template and render it with a context. Return a string.
+
+    template_name may be a string or a list of strings.
+    """
+    
+    # 得られたTemplateオブジェクトのrenderメソッドを呼び出す
+    if isinstance(template_name, (list, tuple)):
+        template = select_template(template_name, using=using)
+    else:
+        template = get_template(template_name, using=using)
+    return template.render(context, request)
+```
+
+それっぽい処理が呼ばれています。
+ここでのテンプレートオブジェクトを得る処理はかなり複雑なので、ブレイクポイントをもとにした呼び出し順を見るにとどめておきます。
+
+![image](https://user-images.githubusercontent.com/43694794/178094125-4307a1fb-81da-4d95-a4db-87dc1702ade0.png)
+
+確かに、`render_to_string()`から`Template.render()`が呼ばれていることが確認できました。
+ここから、「viewで渡したコンテキストをそのまま受け取っている」ことが分かります。
+
+#### 復習-処理の流れ
+
+少し駆け足気味でしたが、`Client.request()`が受け取っていたテンプレート・コンテキストがどこからつくられたのか、概要をたどることができました。
+たくさんの処理を見てきたので、迷子にならないよう、改めて処理の流れを復習しておきましょう。その後で本当のゴール、すなわち`Client.request()`が返しているものを読み解いていきます。
+
+---
+
+要点を押さえるためにも、各処理がどのように連携しているのか、箇条書きでまとめてみます。
+
+* テストコードでviewを検証するために`Client.get()`から処理を開始
+* リクエスト情報をもとに`Client.request()`が呼ばれる
+* テンプレートを描画する度に、描画時点のテンプレート・コンテキスト情報を保存しておけるようにsignalを登録 登録対象は、`Template._render()`
+* DjangoのHTTPレスポンス生成処理を実行
+
+* パス情報をもとに呼び出すべきviewを探索
+* viewからHTTPレスポンスを組み立て
+* `render_to_string()`のような、テンプレートから文字列を組み立てる処理をコンテキストをもとに呼び出し
+* `Template.render()`(テンプレートのレンダリング処理)を実行
+* `Template._render()`にsignalを送る処理が登録されていることから、描画処理の前に、`render_to_string()`へ渡されたコンテキストや、対応するテンプレート情報と共に`template_rendered signal`を送信
+
+* signalのreceiver `store_rendered_templates()`で辞書dataへテンプレート・コンテキスト情報を保存
+* `Client.request()`が返却するレスポンスオブジェクトへテンプレート・コンテキスト情報を設定
+
+一言でまとめると、`Client.request()`で定義した処理のおかげで、各viewがテンプレートをレンダリングしたときのテンプレート・コンテキスト情報が参照できるようになります。
+これは、viewで参照されたテンプレート・コンテキストが期待通りか検証したい、というviewのテストコードの目的ともぴったり合います。
+
+---
+
+### `store_rendered_templates()`
+
+ようやく、`store_rendered_templates()`へどのようなものが保存されているのか知ることができました。
+具体的なコードと理解を照らし合わせるためにも、もう一度該当の処理を見てみます。
+
+```Python
+# django.test.client.py
+def store_rendered_templates(store, signal, sender, template, context, **kwargs):
+    """
+    Store templates and contexts that are rendered.
+
+    The context is copied so that it is an accurate representation at the time
+    of rendering.
+    """
+
+    # store引数は、Client.request()で見ていた辞書dataと対応
+    # この場でstore引数を書き換えることで、辞書dataもあわせて変更される
+
+    # viewでは複数のテンプレートを組み合わせてレスポンスをつくることもあるので、
+    # レンダリングの度に描画したテンプレート情報を保存
+    store.setdefault('templates', []).append(template)
+    
+    # コンテキストもテンプレートと同様
+    if 'context' not in store:
+        store['context'] = ContextList()
+    store['context'].append(copy(context))
+```
+
+呼び出し方が分かることで、この関数に書かれた処理が「なぜそのように書くのか」見えてきました。理解を忘れないよう具体的な言葉にしておきましょう。
+`store_rendered_templates()`はテンプレートがレンダリングされる度に、レンダリング時のテンプレート・コンテキスト情報を保存する処理です。
+
+ということは、各レンダリング処理のテンプレート・コンテキストを保存しておかなければなりません。
+よって、テンプレートとコンテキストはリスト形式で保存されるのです。
+
+---
+
+これで、`Client.get()`から得られたレスポンスからテンプレート情報を取り出すときに、`response.templates`のように書かないといけない理由を突き止めることができました。
+
+ただ、コンテキストは単純なリストではないようなので、もう少し掘り下げてみましょう。
+
+
+### Context
+
+
 
 ### ContextList
 
