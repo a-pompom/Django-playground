@@ -58,11 +58,12 @@ def test_something(self):
     assert template_name == expected_template_name
 
     # レスポンスからコンテキストの値を参照
+    # コンテキストの辞書そのものを等価比較することはできない
     context_value = response.context.get('some_key', None)
     assert context_value == expected_context_value
 ```
 
-`django.test.client.Client`から受け取ったレスポンスは、テンプレートがリスト形式であったり、コンテキストが単純な辞書ではなかったりと、各属性が直感的ではない形をしています。
+`django.test.client.Client`から受け取ったレスポンスは、テンプレートがリスト形式であったり、コンテキストがviewで渡した単純な辞書ではなかったりと、各属性が直感的ではない形をしています。
 このままでは型も実体も分からないので、十分な理解のもとテストコードが書けなくなってしまいます。
 
 ## やりたいこと
@@ -74,6 +75,7 @@ def test_something(self):
 ですので、Djangoが提供している`django.test.testcases.SimpleTestCase`のような書き味でテンプレート・コンテキストを検証できるようなヘルパー関数をつくることにします。
 
 まとめると、Clientのざっくりとした仕組みを知ることで、Django + pytestでHTTPリクエスト・レスポンス周辺のテストコードをシンプルに書けるようになることを目指してみます。
+
 
 ## Clientの実装を追ってみる
 
@@ -227,6 +229,8 @@ class Client(ClientMixin, RequestFactory):
             response = self.handler(environ)
         # 中略...
         
+    # イニシャライザ
+    # self.handlerはClientHandlerを指す
     def __init__(self, enforce_csrf_checks=False, raise_request_exception=True, **defaults):
         super().__init__(**defaults)
         self.handler = ClientHandler(enforce_csrf_checks)
@@ -252,8 +256,8 @@ class ClientHandler(BaseHandler):
         if self._middleware_chain is None:
             self.load_middleware()
 
-        # Request goes through middleware.
         # django.core.handlers.base.BaseHandler.get_response()を呼び出す
+        # Request goes through middleware.
         response = self.get_response(request)
 ```
 
@@ -262,7 +266,7 @@ class ClientHandler(BaseHandler):
 テストのために色々と処理は書かれていますが、どうやらレスポンスそのものはDjango本体の処理からつくり出されているようです。
 より具体的には、`self.get_response()`から、`<HttpResponse status_code=200, "text/html; charset=utf-8">`のようなHttpResponseオブジェクトがつくられています。
 
-ということで`Client.request()`に目を向けると、ここでつくられるレスポンスは、Djangoが返してくれたレスポンスへテンプレートやコンテキストの情報を拡張しているようだ、ということが分かります。
+ということで`Client.request()`に目を向けると、ここでつくられるレスポンスは、Djangoが返してくれたHTTPレスポンスオブジェクトへテンプレートやコンテキストの情報を拡張しているようだ、ということが分かります。
 つまり、テンプレート・コンテキストが出来上がる仕組みさえ分かれば、Clientの返すレスポンスの実体がそれなりに見えてきそうです。
 
 
@@ -311,8 +315,8 @@ dataを操作する処理は、`partial()`でpartial objectをつくるところ
 
 [参考](https://docs.python.org/3/library/functools.html#functools.partial)
 
-つくられたオブジェクトは、`store_rendered_templates()`と呼ばれる関数の第一引数をdataに固定した関数を表現しています。
-これを他の関数の引数に渡すことで、`store_rendered_templates()`を呼び出したときにdataを書き換えられるようになります。
+つくられたオブジェクトは、`store_rendered_templates()`と呼ばれる関数の第一引数を辞書dataに固定した関数を表現しています。
+これを他の関数の引数に渡すことで、`store_rendered_templates()`を呼び出したときに辞書dataを書き換えられるようになります。
 
 少しイメージしづらいですが、一連の処理の流れが掴めれば、このように書く理由も見えてくるはずです。
 
@@ -401,7 +405,7 @@ template_rendered = Signal()
 
 > 記法: `Signal.connect(receiver, sender=None, weak=True, dispatch_uid=None)`
 
-receiverはコールバック関数で、signalを契機に発火します。
+receiverはコールバック関数で、signalで送られた内容を受け取るためのものです。今回の場合は、テンプレート・コンテキストを辞書dataへ保存します。
 `Signal.connect()`でreceiverを登録しておくと、何かしらのタイミングでsignalが通知されたときにテンプレート・コンテキストを保存する`store_rendered_template()`が呼び出されます。
 
 #### `Signal.send()`
@@ -493,7 +497,7 @@ Template._render = instrumented_test_render
 Djangoのテンプレートを表現するTemplateクラスの`_render()`属性を上書きしています。
 このように書いた理由は、Djangoがテンプレートをレンダリングしている処理にテストで介入するためです。
 
-言い換えれば、テストコードにおいて、Djangoがテンプレートを描画する処理は次のように動作します。
+テストコードにおいて、Djangoがテンプレートを描画する処理は次のように動作します。
 
 * 描画時点のテンプレート・コンテキスト情報をもとにsignal template_renderedを送信
 * Djangoがテンプレートをレンダリング
@@ -544,7 +548,7 @@ class Template:
 
 #### Template.renderはどのように呼ばれるか
 
-`Template.render()`を呼び出している処理をさらっと追っていきます。あまり深くまで入り込むと戻ってこられなくなりそうなので、おもてから見える表面的な部分から重要なところを抜き出してみます。
+`Template.render()`を呼び出している処理を追っていきます。あまり深くまで入り込むと戻ってこられなくなりそうなので、表面的な部分から重要なところを抜き出してみます。
 例として、テンプレートのレンダリング結果をHTTPレスポンスとして設定しているviewの処理を見てみます。
 
 ```Python
@@ -592,7 +596,35 @@ def render_to_string(template_name, context=None, request=None, using=None):
 確かに、`render_to_string()`から`Template.render()`が呼ばれていることが確認できました。
 ここから、「viewで渡したコンテキストをそのまま受け取っている」ことが分かります。
 
-#### 復習-処理の流れ
+#### `instrumented_test_render`が引数として受け取るもの
+
+`Template._render()`の概要が見えてきたので、signalを送っている`instrumented_test_render()`へ戻ります。
+あちこちを行ったり来たりしていたので、改めてコードを確認しておきます。
+
+```Python
+# django.test.utils.py
+
+# Templateのレンダリング処理へ介入するための処理
+def instrumented_test_render(self, context):
+    """
+    An instrumented Template render method, providing a signal that can be
+    intercepted by the test Client.
+    """
+    template_rendered.send(sender=self, template=self, context=context)
+
+    # self.nodelist.render()はDjangoがテンプレートを描画する処理の一部
+    return self.nodelist.render(context)
+```
+
+`Template._render()`を見て分かったことをまとめてみます。
+
+* ここでのselfはTemplateオブジェクト より具体的には、viewのレンダリングで参照されるテンプレートを表現したものを指す
+* contextはviewのレンダリングで渡されたものとほぼ等価と見てよい
+
+まとめると、`template_rendered.send()`でシグナルと共に送られるテンプレート・コンテキストの情報は、viewのレンダリングで参照していたものを表していたことが分かりました。
+
+
+### 復習-処理の流れ
 
 少し駆け足気味でしたが、`Client.request()`が受け取っていたテンプレート・コンテキストがどこからつくられたのか、概要をたどることができました。
 たくさんの処理を見てきたので、迷子にならないよう、改めて処理の流れを復習しておきましょう。その後で本当のゴール、すなわち`Client.request()`が返しているものを読み解いていきます。
@@ -616,7 +648,7 @@ def render_to_string(template_name, context=None, request=None, using=None):
 * `Client.request()`が返却するレスポンスオブジェクトへテンプレート・コンテキスト情報を設定
 
 一言でまとめると、`Client.request()`で定義した処理のおかげで、各viewがテンプレートをレンダリングしたときのテンプレート・コンテキスト情報が参照できるようになります。
-これは、viewで参照されたテンプレート・コンテキストが期待通りか検証したい、というviewのテストコードの目的ともぴったり合います。
+これは、viewで参照されたテンプレート・コンテキストが期待通りか検証したい、というviewのテストコードの目的にもぴったりはまります。
 
 ---
 
@@ -663,13 +695,242 @@ def store_rendered_templates(store, signal, sender, template, context, **kwargs)
 
 ### Context
 
+Django + pytestで`Client.get()`から得られたレスポンスのコンテキストオブジェクトを検証しようと思ったとき、次のように書いたことがあるかもしれません。
 
+```Python
+# コンテキストの運勢要素は関数から生成されたか
+def test_context_value(self):
+    client = Client()
+    context = {'some_key': 'some_value'}
+    
+    # レスポンスを生成
+    # コンテキストがviewで渡したものと等しいか比較
+    response = client.get('some_url')
+    assert response.context == context
+```
+
+contextという属性名から、なんとなくviewのレンダリング処理に渡したコンテキストと同じものが得られることを期待しています。
+しかし、このテストは通らず、実際にレスポンスに設定されていたコンテキストは以下のように表示されます。
+
+```bash
+Expected :{'some_key': 'some_value'}
+Actual   :[{'True': True, 'False': False, 'None': None}, {'some_key': 'some_value'}]
+```
+
+これは、レンダリング処理に渡した辞書ではなく、`django.template.context.Context`オブジェクトを表しています。
+表示されているリストは、Contextオブジェクトのdicts属性を`__repr__()`で出力したものです。
+
+※ 先頭の辞書は`django.template.context.BaseContext`でbuiltinsとして定義されているものです。詳しい説明はありませんでしたが、おそらくDjangoがテンプレートを解釈するときに参照していると思われます。
+
+なにやら難しそうに見えますが、Contextオブジェクトは辞書アクセス用のメソッドをいくつか用意しているので、テンプレートのレンダリング処理で参照される読み取り専用の辞書ぐらいに思っておいて大丈夫です。
+テストコードでは、`Context.get()`からコンテキストのキーでアクセスすることで、値を取り出すことできます。
+
+---
+
+`Client.get()`から得られたレスポンスのコンテキストがこのような形になっているということは、`store_rendered_templates()`で設定されていたものも、Contextオブジェクトであったことが分かります。
+続いて、各レンダリングで参照したContextオブジェクトをリストっぽく保存しているものを見てみましょう。
 
 ### ContextList
 
-`django.test.utils.ContextList`, `django.template.context`
+`store_rendered_templates()`では、レンダリングで参照したコンテキストを`django.test.utils.ContextList`というオブジェクトへ追加しています。
+
+```Python
+# store_rendered_templatesのコンテキストを設定している処理
+
+if 'context' not in store:
+    store['context'] = ContextList()
+store['context'].append(copy(context))
+```
+
+ContextListはlistを継承したオブジェクトで、複数あるコンテキストを1つの辞書として扱えるようにするためのインタフェースを提供します。小難しい表現となってしまいましたが、実装を見てみれば、どのようにContextオブジェクトを扱っているのか掴めてくると思います。
+
+```Python
+# django.test.utils.py
+class ContextList(list):
+    """
+    A wrapper that provides direct key access to context items contained
+    in a list of context objects.
+    """
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            for subcontext in self:
+                if key in subcontext:
+                    return subcontext[key]
+            raise KeyError(key)
+        else:
+            return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        try:
+            return self.__getitem__(key)
+        except KeyError:
+            return default
+    
+    # 中略...
+```
+
+例えば、テストコードではリスト形式のContextListオブジェクトへ`context['some_key']`または`context.get('some_key')`のようにアクセスすると、各レンダリングで参照したコンテキストをすべて探しに行ってくれます。
+
+---
+
+### たどり着いたゴール
+
+これでコンテキストの中身も知ることができました。
+つまり、今回の大きな目標である、`Client.get()`から得られるレスポンスへどのようにテンプレートやコンテキストが設定されているのか知ることができました。
+
+今なら、最初にテンプレートやコンテキストを扱うテストコードを書いたときに抱いていた疑問も解消できるはずです。
+テストコードを再度見ながら、確認してみましょう。
+
+```Python
+from django.test.client import Client
+
+
+def test_something(self):
+    client = Client()
+    # 期待するテンプレート名・コンテキストオブジェクトの値
+    expected_template_name = 'index.html'
+    expected_context_value = 'some message'
+
+    # テスト用クライアントが返却するレスポンス
+    response = client.get('some_url')
+    # レスポンスからテンプレート名を参照
+    template_name = response.templates[0].name
+    assert template_name == expected_template_name
+
+    # レスポンスからコンテキストの値を参照
+    # コンテキストの辞書そのものを等価比較することはできない
+    context_value = response.context.get('some_key', None)
+    assert context_value == expected_context_value
+```
+
+#### なぜテンプレートはリスト形式なのか
+
+テンプレートはレンダリングの度にsignalを通じて保存されるので、リスト形式のものがレスポンスへ設定されます。
+
+#### なぜコンテキストは辞書のはずなのにviewで渡したものと異なるのか
+
+コンテキストもレンダリングの度に保存されることから、複数のものが存在し得ます。
+しかし、リスト形式の辞書ではテストコードで扱いづらいことから、listのインタフェースを持つContextListオブジェクトがレスポンスへ設定されます。
+よって、viewで渡したコンテキストの辞書とは異なるものになります。
+
+---
+
 
 ## Clientから得られるレスポンスをpytestでも検証したい
 
+全体の流れをたどり、`Client.get()`の返すものを理解することができました。
+ここで終わっても今回の目的は果たせていますが、時間が経つとレスポンスに設定されたテンプレート・コンテキストの情報がどのようなものだったか忘れてしまいそうです。
+
+そこで、テンプレート・コンテキストを表現する型を定義し、テストコードでシンプルに扱えるようにするfixtureをつくることで、知識を再利用できる形で残しておきます。
+これだけだとイメージしづらいので、実際につくったfixtureと、テストコードの利用例を見てみましょう。
+
+```Python
+# conftest.py
+from typing import Union
+
+from django.http import HttpResponse
+from django.template.base import Template
+from django.test.utils import ContextList
+from django.template.context import Context
 
 
+class ClientResponseAttribute:
+    """ TestClientがresponseオブジェクトへ注入する追加の属性を表現することを責務に持つ """
+    templates: list[Template]
+    context: Union[Context, ContextList]
+
+
+# Client.get()から得られたレスポンスをテストコードで参照するときの型 テストで利用する型のみに簡略化
+# ※ 本来得られるレスポンスは双方の性質を持つ交差型である
+# しかし、2022年7月時点では交差型が無いこと・型の恩恵を得る手段がUnionしかないことからUnion型で定義した
+TypeClientResponse = Union[HttpResponse, ClientResponseAttribute]
+
+
+class AssertionHelper:
+    """ django.test.TestCaseが担っていたassertionを表現することを責務に持つ """
+
+    def assert_template_used(self, response: ClientResponseAttribute, template_name: str):
+        """
+        TestClientがレスポンスを生成したとき、指定のテンプレートファイルが利用されたことを表明
+
+        :param response: TestClientが返却するレスポンスオブジェクト
+        :param template_name: テンプレートファイル名
+        """
+
+        template_names = [template.name for template in response.templates if template.name is not None]
+        assert template_name in template_names
+
+    def assert_context_get(self, response: ClientResponseAttribute, key: str, value):
+        """
+        コンテキストオブジェクトのキーで対応する要素が期待通りであることを表明
+
+        :param response: TestClientが返却するレスポンスオブジェクト
+        :param key: コンテキストの対象キー
+        :param value: 期待値
+        """
+        context = response.context
+        assert context.get(key) == value
+```
+
+```Python
+class TestFortuneTelling:
+    """ おみくじ画面のテスト """
+
+    # おみくじ画面のテンプレートを参照しているか
+    def test_use_result_template(self, assertion_helper):
+        client = Client()
+        expected = 'fortune.html'
+        
+        response = client.get('おみくじのURL')
+        
+        # レスポンスから得られるテンプレートを検証
+        assertion_helper.assert_template_used(response, expected)
+
+    # コンテキストの運勢要素は関数から生成されたか
+    def test_context_fortune(self, assertion_helper):
+        client = Client()
+        context_key_of_fortune = 'fortune'
+        expected = '大吉'
+        
+        response = client.get('おみくじのURL')
+        
+        # レスポンスから得られるコンテキストを検証
+        assertion_helper.assert_context_get(response, context_key_of_fortune, expected)
+```
+
+`Client.get()`が返すレスポンスに設定されたテンプレート・コンテキストの情報を、型によってコード上に知識として記すことができました。
+簡易的なものではありますが、これでDjango + pytestでテンプレートとコンテキストを検証するテストコードを以前よりも中身を理解して書けるようになるはずです。
+
+
+#### 補足: なぜresponseの型はWSGIRequestを含むものに推論されたのか
+
+最後に補足として、`Client.get()`が返すオブジェクトの型推論が崩れていた理由を見ておきます。
+そもそもここで正しく型が記述されていれば、ここまで苦労することもなかったはずです。
+
+とはいえ、Django本体には型ヒントが書かれていないかつ、複雑なフローで処理が呼び出されていることから、正確に推論するのは困難です。
+ひとまず推論された結果がなぜそのようになったのか、概略だけ見ておきましょう。
+
+型情報は、`Union[{redirect_chain, status_code, url}, WSGIRequest]`のように書かれておりました。
+まず、WSGIRequestは、RequestFactoryから`self.request()`で呼ばれた`Client.request()`ではなく、`RequestFactory.request()`をもとに型が推論されたことによります。
+そして、辞書っぽいオブジェクトの型は、`Client.get()`でリダイレクトを扱う処理から推論されました。
+
+```Python
+# django/test/client.py
+
+def get(self, path, data=None, follow=False, secure=False, **extra):
+    """Request a response from the server using GET."""
+    self.extra = extra
+    response = super().get(path, data=data, secure=secure, **extra)
+
+    # リダイレクト用の処理により、{redirect_chain, status_code, url}の型が推論された
+    if follow:
+        response = self._handle_redirects(response, data=data, **extra)
+    return response
+```
+
+
+
+## まとめ
+
+`Client.get()`が返すレスポンスに設定されたテンプレート・コンテキストオブジェクトがどのようなものであるか、概要を追ってきました。
+大変な道のりではありましたが、Djangoがテストコードのために用意してくれたモジュールが何をもたらしてくれるのか、少しでも見えてきたら幸いです。
