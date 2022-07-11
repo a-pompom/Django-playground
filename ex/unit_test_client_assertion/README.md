@@ -127,6 +127,7 @@ class Client(ClientMixin, RequestFactory):
         return response
 
 
+# テストコードで扱うHTTPリクエストオブジェクトを組み立てるための処理
 class RequestFactory:
     """
     Class that lets you create mock Request objects for use in testing.
@@ -199,7 +200,7 @@ class Client(ClientMixin, RequestFactory):
         return response
 ```
 
-たくさんのメソッドが呼ばれていますが、ざっくりまとめると、リクエスト情報をよしなに整形した上で、`Client.request()`から呼び出し元へ返すレスポンスを組み立てています。
+たくさんのメソッドが呼ばれていますが、ざっくりまとめるとリクエスト情報をよしなに整形した上で、`Client.request()`から呼び出し元へ返すレスポンスを組み立てています。
 つまり、`Client.request()`にて、どのようにテンプレート・コンテキストがつくられているのかさえ理解できれば、今回の目的は果たせそうです。
 
 
@@ -266,7 +267,7 @@ class ClientHandler(BaseHandler):
 テストのために色々と処理は書かれていますが、どうやらレスポンスそのものはDjango本体の処理からつくり出されているようです。
 より具体的には、`self.get_response()`から、`<HttpResponse status_code=200, "text/html; charset=utf-8">`のようなHttpResponseオブジェクトがつくられています。
 
-ということで`Client.request()`に目を向けると、ここでつくられるレスポンスは、Djangoが返してくれたHTTPレスポンスオブジェクトへテンプレートやコンテキストの情報を拡張しているようだ、ということが分かります。
+ということで`Client.request()`に目を向けると、ここでつくられるレスポンスは、Djangoが返してくれたHTTPレスポンスオブジェクトをテンプレートやコンテキストの情報をもとに拡張しているようだ、ということが分かります。
 つまり、テンプレート・コンテキストが出来上がる仕組みさえ分かれば、Clientの返すレスポンスの実体がそれなりに見えてきそうです。
 
 
@@ -316,7 +317,7 @@ dataを操作する処理は、`partial()`でpartial objectをつくるところ
 [参考](https://docs.python.org/3/library/functools.html#functools.partial)
 
 つくられたオブジェクトは、`store_rendered_templates()`と呼ばれる関数の第一引数を辞書dataに固定した関数を表現しています。
-これを他の関数の引数に渡すことで、`store_rendered_templates()`を呼び出したときに辞書dataを書き換えられるようになります。
+これにより、`store_rendered_templates()`を呼び出したときに関数の内部で辞書dataを書き換えられるようになります。
 
 少しイメージしづらいですが、一連の処理の流れが掴めれば、このように書く理由も見えてくるはずです。
 
@@ -345,11 +346,11 @@ def store_rendered_templates(store, signal, sender, template, context, **kwargs)
     store['context'].append(copy(context))
 ```
 
-先ほども見た通り、第一引数は辞書dataに固定されていることから、関数の中で書き換えられた内容も`Client.request()`内部の処理へ反映されます。
+先ほども見た通り、第一引数storeは辞書dataに固定されていることから、関数の中で書き換えられた内容も`Client.request()`内部の処理へ反映されます。
 つまり、この関数を通じてテンプレートやコンテキストが設定されているようです。
 型などを詳しく見ていけば`Client.request()`の返すものも分かってきそうですが、1つ大きな問題があることから、一旦保留にしておきます。
 
-テンプレート・コンテキストの実体を知る上で課題となるのは、`store_rendered_templates()`がいつ・どのように呼び出されるか見えづらいことです。
+課題となるのは、テンプレート・コンテキストの実体を知る上で`store_rendered_templates()`がいつ・どのように呼び出されるか見えづらいことです。
 
 ### signals
 
@@ -405,8 +406,8 @@ template_rendered = Signal()
 
 > 記法: `Signal.connect(receiver, sender=None, weak=True, dispatch_uid=None)`
 
-receiverはコールバック関数で、signalで送られた内容を受け取るためのものです。今回の場合は、テンプレート・コンテキストを辞書dataへ保存します。
-`Signal.connect()`でreceiverを登録しておくと、何かしらのタイミングでsignalが通知されたときにテンプレート・コンテキストを保存する`store_rendered_template()`が呼び出されます。
+receiverはコールバック関数で、signalで送られた内容を受け取るためのものです。
+今回の例では、`Signal.connect()`でreceiverを登録しておくと、何かしらのタイミングでsignalが通知されたときにテンプレート・コンテキストを保存する`store_rendered_template()`が呼び出されます。
 
 #### `Signal.send()`
 
@@ -433,7 +434,7 @@ def store_rendered_templates(store, signal, sender, template, context, **kwargs)
 #### `instrumented_test_render()`
 
 `template_rendered.send()`がいつ・どのように呼ばれるのか段階的に見ていきたいところではあります。
-しかし、signalはその性質上どこでも通知することができるので、これまでのようにある処理から順を追って見ていてもsignalを送っているところにたどり着くのは困難です。
+しかし、signalはその性質上どこからでも通知することができるので、これまでのようにある処理から順を追って見ていてもsignalを送っているところにたどり着くのは困難です。
 
 よって、正攻法とは言いがたいですが、Django本体のソース全体を`template_rendered.send`で検索します。
 こうすることで、どこからでも送ることのできるsignalが発火した場所を知ることができます。実際に呼び出しているところを見てみましょう。
@@ -507,7 +508,7 @@ HTTPレスポンスに含まれるHTMLなどの結果ではなく、過程のテ
 
 ### Template
 
-いかにもな名前のTemplateクラスを追っていきます。おそらく、このクラス自身にはテンプレートの情報が、そして、このクラスに定義されたレンダリング処理にはコンテキストの情報が書かれるはずです。
+いかにもな名前のTemplateクラスを追っていきます。おそらく、このクラス自身にはテンプレートの情報が、そして、このクラスに定義されたレンダリング処理にはコンテキストの情報が渡されるはずです。
 それが分かればついにゴールへたどり着けそうです。とはいえテストコードとはどんどん離れてきたので、要点をつまむ程度に見ていくことにします。
 
 まずはクラスの概要をざっと見てみます。
@@ -588,13 +589,13 @@ def render_to_string(template_name, context=None, request=None, using=None):
     return template.render(context, request)
 ```
 
-それっぽい処理が呼ばれています。
+`template.render()`というそれっぽい処理が呼ばれています。
 ここでのテンプレートオブジェクトを得る処理はかなり複雑なので、ブレイクポイントをもとにした呼び出し順を見るにとどめておきます。
 
 ![image](https://user-images.githubusercontent.com/43694794/178094125-4307a1fb-81da-4d95-a4db-87dc1702ade0.png)
 
 確かに、`render_to_string()`から`Template.render()`が呼ばれていることが確認できました。
-ここから、「viewで渡したコンテキストをそのまま受け取っている」ことが分かります。
+ここから、「viewで渡したコンテキストをもとにしたものがコンテキストとして渡されている」ことが分かります。
 
 #### `instrumented_test_render`が引数として受け取るもの
 
@@ -621,13 +622,13 @@ def instrumented_test_render(self, context):
 * ここでのselfはTemplateオブジェクト より具体的には、viewのレンダリングで参照されるテンプレートを表現したものを指す
 * contextはviewのレンダリングで渡されたものとほぼ等価と見てよい
 
-まとめると、`template_rendered.send()`でシグナルと共に送られるテンプレート・コンテキストの情報は、viewのレンダリングで参照していたものを表していたことが分かりました。
+まとめると、`template_rendered.send()`でsignalと共に送られるテンプレート・コンテキストの情報は、viewのレンダリングで参照していたものを表していたことが分かりました。
 
 
 ### 復習-処理の流れ
 
 少し駆け足気味でしたが、`Client.request()`が受け取っていたテンプレート・コンテキストがどこからつくられたのか、概要をたどることができました。
-たくさんの処理を見てきたので、迷子にならないよう、改めて処理の流れを復習しておきましょう。その後で本当のゴール、すなわち`Client.request()`が返しているものを読み解いていきます。
+たくさんの処理を見てきたので、迷子にならないよう、改めてここまでの処理の流れを復習しておきましょう。その後で本当のゴール、すなわち`Client.request()`が返しているものを読み解いていきます。
 
 ---
 
@@ -645,9 +646,9 @@ def instrumented_test_render(self, context):
 * `Template._render()`にsignalを送る処理が登録されていることから、描画処理の前に、`render_to_string()`へ渡されたコンテキストや、対応するテンプレート情報と共に`template_rendered signal`を送信
 
 * signalのreceiver `store_rendered_templates()`で辞書dataへテンプレート・コンテキスト情報を保存
-* `Client.request()`が返却するレスポンスオブジェクトへテンプレート・コンテキスト情報を設定
+* `Client.request()`が返却するレスポンスオブジェクトへ辞書dataをもとにテンプレート・コンテキスト情報を設定
 
-一言でまとめると、`Client.request()`で定義した処理のおかげで、各viewがテンプレートをレンダリングしたときのテンプレート・コンテキスト情報が参照できるようになります。
+一言でまとめると、`Client.request()`で定義した処理のおかげで、各viewがテンプレートをレンダリングしたときのテンプレート・コンテキスト情報がテストコードで参照できるようになります。
 これは、viewで参照されたテンプレート・コンテキストが期待通りか検証したい、というviewのテストコードの目的にもぴったりはまります。
 
 ---
@@ -688,9 +689,9 @@ def store_rendered_templates(store, signal, sender, template, context, **kwargs)
 
 ---
 
-これで、`Client.get()`から得られたレスポンスからテンプレート情報を取り出すときに、`response.templates`のように書かないといけない理由を突き止めることができました。
+これで、`Client.get()`から得られたレスポンスからテンプレート情報を取り出すときに、`response.templates[0]`のように書く理由を突き止めることができました。
 
-ただ、コンテキストは単純なリストではないようなので、もう少し掘り下げてみましょう。
+ただ、コンテキストは単純な辞書のリストではないようなので、もう少し掘り下げてみましょう。
 
 
 ### Context
@@ -718,7 +719,7 @@ Actual   :[{'True': True, 'False': False, 'None': None}, {'some_key': 'some_valu
 ```
 
 これは、レンダリング処理に渡した辞書ではなく、`django.template.context.Context`オブジェクトを表しています。
-表示されているリストは、Contextオブジェクトのdicts属性を`__repr__()`で出力したものです。
+Actualという名称で表示されているものは、Contextオブジェクトのdicts属性を`__repr__()`で出力したものです。
 
 ※ 先頭の辞書は`django.template.context.BaseContext`でbuiltinsとして定義されているものです。詳しい説明はありませんでしたが、おそらくDjangoがテンプレートを解釈するときに参照していると思われます。
 
@@ -729,6 +730,8 @@ Actual   :[{'True': True, 'False': False, 'None': None}, {'some_key': 'some_valu
 
 `Client.get()`から得られたレスポンスのコンテキストがこのような形になっているということは、`store_rendered_templates()`で設定されていたものも、Contextオブジェクトであったことが分かります。
 続いて、各レンダリングで参照したContextオブジェクトをリストっぽく保存しているものを見てみましょう。
+
+※ Contextオブジェクトそのものは、viewで渡したコンテキスト情報をもとに、テンプレートのレンダリング処理でつくられます。
 
 ### ContextList
 
@@ -769,7 +772,7 @@ class ContextList(list):
     # 中略...
 ```
 
-例えば、テストコードではリスト形式のContextListオブジェクトへ`context['some_key']`または`context.get('some_key')`のようにアクセスすると、各レンダリングで参照したコンテキストをすべて探しに行ってくれます。
+例えば、テストコードではリスト形式のContextListオブジェクトへ`context['some_key']`または`context.get('some_key')`のようにアクセスすると、各レンダリングで参照したコンテキスト全体の中から探しに行ってくれます。
 
 ---
 
@@ -805,7 +808,7 @@ def test_something(self):
 
 #### なぜテンプレートはリスト形式なのか
 
-テンプレートはレンダリングの度にsignalを通じて保存されるので、リスト形式のものがレスポンスへ設定されます。
+テンプレートはレンダリングの度にsignalを通じて保存されるので、複数回保存され得るレスポンスのテンプレート情報は、リスト形式で設定されます。
 
 #### なぜコンテキストは辞書のはずなのにviewで渡したものと異なるのか
 
@@ -834,16 +837,13 @@ from django.test.utils import ContextList
 from django.template.context import Context
 
 
-class ClientResponseAttribute:
+class ClientResponseAttribute(HttpResponse):
     """ TestClientがresponseオブジェクトへ注入する追加の属性を表現することを責務に持つ """
     templates: list[Template]
     context: Union[Context, ContextList]
 
 
-# Client.get()から得られたレスポンスをテストコードで参照するときの型 テストで利用する型のみに簡略化
-# ※ 本来得られるレスポンスは双方の性質を持つ交差型である
-# しかし、2022年7月時点では交差型が無いこと・型の恩恵を得る手段がUnionしかないことからUnion型で定義した
-TypeClientResponse = Union[HttpResponse, ClientResponseAttribute]
+TypeClientResponse = ClientResponseAttribute
 
 
 class AssertionHelper:
@@ -927,7 +927,6 @@ def get(self, path, data=None, follow=False, secure=False, **extra):
         response = self._handle_redirects(response, data=data, **extra)
     return response
 ```
-
 
 
 ## まとめ
