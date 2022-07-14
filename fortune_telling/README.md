@@ -6,6 +6,10 @@ Djangoでランダムに運勢を表示するおみくじアプリをつくっ�
 
 Djangoのテンプレート・コンテキストを理解し、おみくじの結果を表示するアプリケーションをつくることを目指します。
 
+## 目次
+
+[toc]
+
 ## 用語整理
 
 * テンプレート: HTTPレスポンスのボディとなるHTMLを生成するためのひな形
@@ -24,7 +28,7 @@ Djangoのテンプレート・コンテキストを理解し、おみくじの�
 図2: おみくじ結果画面
 
 機能に物足りなさはありますが、動的にHTMLを表示したり、画面を切り替えたりと、いくつかのDjangoの新しい知識を身につけることができます。
-どのようにDjangoで上図のようなアプリケーションをつくっていくのか、一歩ずつ見ていきましょう。
+どのようにDjangoでおみくじアプリケーションをつくっていくのか、一歩ずつ見ていきましょう。
 
 
 ## 前準備-復習
@@ -33,7 +37,7 @@ Hello Worldアプリケーションでも触れましたが、Djangoでアプリ
 
 ### プロジェクトをつくる
 
-まずはDjangoアプリケーションの設定値などを持つプロジェクトをつくります。
+まずはアプリケーションそのものと付随する設定値などを持つプロジェクトをつくります。
 
 ```bash
 # Hello Worldとは別のsrcディレクトリで実行してください。
@@ -77,7 +81,7 @@ $ tree
 │         │    └── __init__.py
 │         ├── models.py
 │         ├── tests.py
-│         └── views.py
+│         └── raw.py
 └── manage.py
 ```
 
@@ -110,7 +114,7 @@ INSTALLED_APPS = [
 
 ## トップ画面
 
-まずは入り口となる画面から始めます。別画面へのリンクまで実装しようと思うと、考えることが多くなってしまいます。よって、ここではとりあえず画面を表示させることだけに集中します。
+まずは入り口となる画面から始めます。別画面へのリンクまで実装しようと思うと考えることが多くなってしまうので、とりあえず画面を表示させることだけに集中します。
 
 ### テンプレート
 
@@ -135,7 +139,7 @@ def sample(request: HttpRequest) -> HttpResponse:
 しかし、これでは見た目を変えるためにPythonファイルをメンテナンスすることになり、表示とロジックが密に結びついてしまいます。そもそも補完や自動生成など、エディタの恩恵を受けられなくなり、開発効率ががくっと下がってしまいそうです。
 
 ここで、表示したい画面のひな形となるHTMLファイルを用意しておき、おみくじの結果・登録されたユーザ名など、動的に描画したいものだけを個別に埋め込めるようになればうまくいきそうです。
-Djangoはこういった課題を解決するため、`テンプレート`という仕組みを提供してくれています。
+Djangoはこういった課題を解決するために、`テンプレート`という仕組みを提供してくれています。
 
 ---
 
@@ -150,7 +154,7 @@ Djangoはこういった課題を解決するため、`テンプレート`とい
 ![image](https://user-images.githubusercontent.com/43694794/151650101-0bbd94c5-75fe-4815-aaf6-6017d6bdb4fd.png)
 図3: テンプレートを含めたディレクトリ構成
 
-こうすることで、Djangoがテンプレートを探しにいくときのルールをシンプルにすることができます。
+こうすることで、Djangoがテンプレートを探しにいくときのルールをシンプルにすることができます。具体的なルールは後ほど設定値とあわせて見ていきます。
 
 #### HTML
 
@@ -199,13 +203,17 @@ from pathlib import Path
 # BASE_DIRは、srcディレクトリを指す
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+# 中略...
+
+# テンプレート関連の設定
 TEMPLATES = [
     {
-        # どの仕組みでテンプレートからHTMLを組み立てるか
+        # どんな仕組みでテンプレートからHTMLを組み立てるか
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
         # テンプレートファイル探索パス
-        # src/templatesとなる
+        # 下の記述は、src/templatesとなる
         'DIRS': [BASE_DIR / 'templates'],
+        
         # テンプレートファイルを探索するとき、app内部のディレクトリを対象に含めるか
         # 今回はapp以下へテンプレートファイルを配置することはないので、無効にしておく
         'APP_DIRS': False,
@@ -347,7 +355,7 @@ Quit the server with CONTROL-C.
 </html>
 ```
 
-`{{ fortune }}`という見慣れない記述があります。これは、[Django template language](https://docs.djangoproject.com/en/4.0/ref/templates/language/)と呼ばれるテンプレート言語の記法の1つです。テンプレート言語と表現されてはいますが、用途を考えると、テンプレートエンジンと捉えた方が分かりやすいかもしれません。
+`{{ fortune }}`という見慣れない記述があります。これは、[Django template language](https://docs.djangoproject.com/en/4.0/ref/templates/language/)と呼ばれるテンプレート言語の記法の1つです。
 Djangoは上のような記法や、後述するコンテキストというオブジェクトをもとに、動的なHTMLをつくり出すことができます。ここでは、Djangoはテンプレートに特別な記法を含めてレンダリングすると、動的にHTMLをつくってくれるんだな、ということを覚えておきましょう。
 
 #### `{{ variable }}`
@@ -375,7 +383,7 @@ context = {
 テンプレートが出来上がったので、続けてviewへ取り掛かります。viewでは、先ほど少し触れたコンテキストオブジェクトをつくっていることがポイントです。イメージを掴むためにまずはコードを見てみましょう。
 
 ```Python
-# src/fortune_telling/views.py
+# src/fortune_telling/raw.py
 from django.http import HttpRequest, HttpResponse
 from django.template.loader import render_to_string
 
@@ -479,7 +487,7 @@ $ python manage.py runserver
 
 最後の仕上げとして、トップ画面からおみくじを引けるようにしておきます。
 
-おみくじの結果画面は、`http://localhost:8000/fortune/fortune_telling`というURLから見ることができました。ということは、2つの画面を繋げるにはトップ画面へ`<a href="/fortune/fortune_telling">...</a>`のような記述を追加すれば良さそうです。
+おみくじの結果画面は、`http://localhost:8000/fortune/fortune_telling`から見ることができました。ということは、2つの画面を繋げるにはトップ画面へ`<a href="/fortune/fortune_telling">...</a>`のような記述を追加すれば良さそうです。
 ですが、DjangoではURLに依存(べた書き)しない別の方法が推奨されています。それは逆引きと呼ばれる、名前付きURLなるものから対応するURLを得ることです。
 [参考](https://docs.djangoproject.com/en/4.0/topics/http/urls/#reverse-resolution-of-urls)
 
@@ -524,17 +532,17 @@ URLconfでは、appの名前空間や、viewの識別子に関する情報が増
 
 #### 名前付きURL
 
-さて、ここでappの名前空間・viewの識別子が最初に触れた逆引き・名前付きURLとどのように関わるのか整理しておきましょう。
-後ほどテンプレートでも見ていきますが、`appの名前空間:viewの識別子`で記述された文字列こそ、名前付きURLとなります。そして、名前付きURLから対応するURlを得ることは、逆引きと表現されます。
+さて、ここでappの名前空間とviewの識別子が逆引き・名前付きURLとどのように関わるのか整理しておきましょう。
+後ほどテンプレートでも見ていきますが、`appの名前空間:viewの識別子`で記述された文字列こそ、名前付きURLとなります。そして、名前付きURLから対応するURLを得ることは、逆引きと表現されます。
 
-まとめると、urls.pyへappの名前空間(app_name)・viewの識別子(path関数のnameキーワード引数)を追加することで、view関数を名前付きURLで表せるようになりました。名前付きURLは何らかの手段で逆引きされることで、実際にユーザがアクセスできるURLへと変換されます。
+まとめると、urls.pyへappの名前空間(app_name)・viewの識別子(path関数のnameキーワード引数)を追加することで、紐づくview関数を名前付きURLで表せるようになりました。名前付きURLは何らかの手段で逆引きされることで、実際にユーザがアクセスできるURLへと変換されます。
 [参考](https://docs.djangoproject.com/en/4.0/topics/http/urls/#url-namespaces)
 
 ### urlタグ
 
 続いて、テンプレートへ加わった記法を見てみます。
 `{% tag %}`で書かれたものはタグと呼ばれています。if文っぽいもの・for文っぽいものや、今回のようにURL文字列を出力するものといったように、様々な用途で使われます。
-つまり、タグを記述することでロジックを書いたり、何らかのオブジェクトを画面向けに加工したりと、テンプレートを拡張することができるようになります。
+つまり、タグを記述することでロジックを書いたり、何らかのオブジェクトを画面向けに加工したりと、テンプレートを拡張できるようになります。
 
 [参考](https://docs.djangoproject.com/en/4.0/ref/templates/language/#tags)
 

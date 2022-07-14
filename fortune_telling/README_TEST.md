@@ -4,8 +4,11 @@ Djangoでつくったおみくじアプリケーションのテストコード�
 
 ## ゴール
 
-逆引きや、viewでつくりだされるコンテキストオブジェクトをどのように検証するのか、理解することを目指します。
+viewで参照されるテンプレートやコンテキストオブジェクトをどのように検証するのか、理解することを目指します。
 
+## 目次
+
+[toc]
 
 ## 復習-テストツール・テスト範囲
 
@@ -50,7 +53,87 @@ def pytest_sessionstart(session):
     django.setup()
 ```
 
+
 ---
+
+### 前準備-テンプレート・コンテキストを検証する手段
+
+※ ここでの準備は雰囲気だけ掴めれば大丈夫です。
+
+早速おみくじアプリケーションのテストコードを...といきたいところですが、その前に1つ解決しておかなければならない課題があります。
+それは、pytestだけではテンプレートやコンテキストを対象としたテストコードが書きづらい、ということです。
+
+そこで、以降ではpytestでテンプレートやコンテキストを検証する手段として、自前のassertionを導入します。
+より具体的には、`conftest.py`へ以下の記述を追加します。
+
+※ なぜpytestではテンプレート・コンテキストのテストコードが書きづらいのか・なぜこのような書き方をするのか、といった背景は[別記事](https://a-pompom.net/article/django/ex/unit-test-client-assertion)にまとめてあります。興味があったら覗いてみてください。
+
+```Python
+import pytest
+from typing import Union
+
+from django.http import HttpResponse
+from django.template.base import Template
+from django.test.utils import ContextList
+from django.template.context import Context
+
+
+class ClientResponseAttribute(HttpResponse):
+    """ Clientがresponseオブジェクトへ注入する追加の属性を表現することを責務に持つ """
+    templates: list[Template]
+    context: Union[Context, ContextList]
+
+
+TypeClientResponse = ClientResponseAttribute
+
+
+class AssertionHelper:
+    """ django.test.TestCaseが担っていたassertionを表現することを責務に持つ """
+
+    def assert_template_used(self, response: ClientResponseAttribute, template_name: str):
+        """
+        TestClientがレスポンスを生成したとき、指定のテンプレートファイルが利用されたことを表明
+
+        :param response: TestClientが返却するレスポンスオブジェクト
+        :param template_name: テンプレートファイル名
+        """
+
+        template_names = [template.name for template in response.templates if template.name is not None]
+        assert template_name in template_names
+
+    def assert_context_get(self, response: ClientResponseAttribute, key: str, value):
+        """
+        コンテキストオブジェクトのキーで対応する要素が期待通りであることを表明
+
+        :param response: TestClientが返却するレスポンスオブジェクト
+        :param key: コンテキストの対象キー
+        :param value: 期待値
+        """
+        context = response.context
+        assert context.get(key) == value
+
+
+# djangoのTestCaseで実装されているassertionをpytestでも実行するためのヘルパー
+@pytest.fixture
+def assertion_helper():
+    return AssertionHelper()
+```
+
+概略だけ書いておくと、`Client.get()`などから得られるレスポンスに設定されたテンプレート・コンテキストは汎用的に扱えるよう少し複雑な形をしています。
+これをテストコードでシンプルに扱えるよう、ラッパーとして自前のassertionを定義しました。
+
+以降では、fixture`assertion_helper()`の助けを借りながらテンプレートやコンテキストの動きを確かめていきます。
+
+#### 補足: なぜpytest-djangoが用意しているAssertionを利用しないのか
+
+実は、pytest-djangoが提供しているAssertionを利用することでも、テンプレート周辺のテストコードをシンプルに書くことができます。
+しかし、こちらは裏側でDjangoが提供している`unittest.TestCase`をベースとしたモジュールを参照しているので、pytestの「エラーメッセージが分かりやすい」という恩恵が薄れてしまいます。
+
+よって、好みの問題ではありますが、今回はpytestの恩恵を最大限授かるために自前のassertionを導入しました。
+
+[参考](https://pytest-django.readthedocs.io/en/latest/helpers.html#assertions)
+
+※ ここでの目的は、Djangoアプリケーションのテストコードを書きやすくすることなので、自前のassertion/pytest-django/その他の手段いずれか好みのものを使ってみてください。
 
 ## トップ画面
 
@@ -71,7 +154,7 @@ def pytest_sessionstart(session):
 
 ただ、一点だけ異なるところがあります。それは、URLの指定方法です。
 トップ画面からおみくじを引くとき、リンクへ記述するURLのところへ、`名前付きURL`を指定していました。これは、URLのべた書きを防ぐことでメンテナンス性を高めるためです。
-ということは、テストコードでもURLはべた書きせずに済ませたいところです。そこで、テストクライアントからリクエストを送信するとき、URLを逆引きで得られるようにします。
+ということは、テストコードでもURLはべた書きせずに済ませたいところです。そこで、テストクライアントからリクエストを送るとき、URLを逆引きで得られるようにします。
 
 細かいところは後ほど見ることにして、ひとまずテストコードを先に眺めておきましょう。
 
@@ -127,22 +210,17 @@ class TestIndex:
     """ トップ画面を表示できるか """
     # 中略...
     # トップ画面のテンプレートを参照しているか
-    def test_use_index_template(self):
+    # ※ 引数assertion_helperは、conftest.pyで書いたfixture
+    def test_use_index_template(self, assertion_helper):
         # GIVEN
         client = Client()
         named_url = 'おみくじ:トップ'
         expected = 'index.html'
         # WHEN
         response = client.get(reverse(named_url))
-        # templates属性の先頭要素のname属性にテンプレートファイル名が格納されている
-        actual = response.templates[0].name
         # THEN
-        assert actual == expected
+        assertion_helper.assert_template_used(response, expected)
 ```
-
-注目すべきは、レスポンスオブジェクトの`templates`属性へアクセスしていることです。ここには、テンプレートを表現するTemplateオブジェクトのリストが設定されています。今回は1つのHTMLファイルしか見ていないので、先頭の要素へアクセスします。
-そして、Templateオブジェクトのname属性には、欲しかった、view関数が参照したHTMLファイルのファイル名が書かれています。
-[参考](https://docs.djangoproject.com/en/4.0/topics/testing/tools/#django.test.Response.templates)
 
 このテストコードにより、トップ画面へのリクエストに対するレスポンスは、トップ画面のテンプレートと対応する`index.html`ファイルをもとにつくられていたことを保証できます。
 
@@ -153,6 +231,7 @@ collecting ... collected 1 item
 views_test.py::TestIndex::test_use_index_template PASSED                 [100%]
 ```
 
+
 ---
 
 ## おみくじ結果画面
@@ -161,11 +240,11 @@ views_test.py::TestIndex::test_use_index_template PASSED                 [100%]
 
 ### おみくじ
 
-Djangoとは少し逸れますが、コンテキストオブジェクトのもとになる、おみくじを引くための関数にも少し触れておきます。
+Djangoからは少し離れますが、コンテキストオブジェクトのもとになる、おみくじを引くための関数にも少し触れておきます。
 おみくじによる運勢はあらかじめ決まっているものではなく、毎回ランダムに算出されます。これまでのように期待値を固定の値(200, index.htmlなど)にすると、運勢によってテストが通ったり通らなかったりしてしまいます。
 
-それではテストとして何も保証できないので、ここでは期待値の範囲を広げることにします。具体的には、ランダムに導き出された運勢がなんであれ、運勢の候補に含まれていれば、よしとします。
-ランダムなものを扱うテストは、対象の処理がどこまで影響するかによって方針が変わってきますが、今回はちょっとした運勢なので、このぐらいで妥協しておきます。
+それではテストコードで何も保証できないので、ここでは期待値の範囲を広げることにします。具体的には、ランダムに導き出された運勢がなんであれ、運勢の候補に含まれていれば、よしとします。
+ランダムなものを扱うテストは、対象の処理がどこまで影響するかによって方針が変わってきます。ですが今回はちょっとした運勢なので、このぐらいで妥協しておきます。
 
 ```Python
 # tests/fortune_telling_test.py
@@ -197,14 +276,14 @@ fortune_telling_test.py::test_fortune_in_candidate PASSED                [100%]
 ### view(コンテキスト)
 
 さて、Djangoへ戻ることにしましょう。おみくじの結果を導き出す処理は、コンテキストオブジェクトを軸に検証していきます。コンテキストオブジェクトは、先ほどまで見てきたおみくじ関数をもとにつくりだされます。
-ステータスコード・参照したテンプレートのテストコードはトップ画面とほとんど変わらないので、割愛します。詳しくは[テストコードへのリンク](https://github.com/a-pompom/Django-playground/blob/main/fortune_telling/tests/views_test.py)を確認してみてください。
+ステータスコード・参照したテンプレートのテストコードはトップ画面とほとんど変わらないので、割愛します。詳しくは[GitHub](https://github.com/a-pompom/Django-playground/blob/main/fortune_telling/tests/views_test.py)を確認してみてください。
 
 ---
 
-おみくじアプリにおいて、コンテキストオブジェクトはランダム要素の関わる関数からつくり出されます。再度コンテキストが関わる処理を見ておきましょう。
+おみくじアプリにおいて、コンテキストオブジェクトはおみくじを引くための関数からつくり出されます。再度コンテキストが関わる処理を見ておきましょう。
 
 ```Python
-# src/fortune_telling/views.py
+# src/fortune_telling/raw.py
 # コンテキストオブジェクト抜粋
 # おみくじ関数の戻り値(運勢)をコンテキストオブジェクトへ設定
 fortune = fortune_module.tell_fortune()
@@ -213,8 +292,9 @@ context = {
 }
 ```
 
-先に触れておくと、コンテキストもテンプレートと同じように、レスポンスオブジェクトの属性から取り出すことができます。つまり、テンプレートと似たような記述から、コンテキストオブジェクトも期待値と比較することができます。テストコードのイメージでも見ておきましょう。
-[参考](https://docs.djangoproject.com/en/4.0/topics/testing/tools/#django.test.Response.context)
+こうして見ると、レンダリングしたときに参照される辞書コンテキストが期待通りのものであることが保証できれば良さそうです。
+ただし、Clientが返すレスポンスに含まれるコンテキストは少し特殊な構造を持つので、辞書のキーと値の組を単位に検証していきます。
+
 
 ```Python
 # tests/views_test.py
@@ -222,24 +302,21 @@ context = {
 class TestFortuneTelling:
     # 中略...
     
-    def test_context_fortune(self):
+    # コンテキストの運勢要素は関数から生成されたか
+    def test_context_fortune(self, assertion_helper):
         # GIVEN
         client = Client()
         named_url = 'おみくじ:結果'
-        # コンテキストオブジェクト(辞書)のおみくじの結果と対応するキー
         context_key_of_fortune = 'fortune'
-        # 期待結果 ※ このままでは問題あり
         expected = '大吉'
-
         # WHEN
         response = client.get(reverse(named_url))
-        # response.contextは辞書のコンテキストオブジェクトが得られるので、辞書として操作
-        actual = response.context.get(context_key_of_fortune, None)
         # THEN
-        assert actual == expected
+        assertion_helper.assert_context_get(response, context_key_of_fortune, expected)
 ```
 
 これで、テンプレートとあわせて参照されるコンテキストオブジェクトを確かめる方法も理解することができました。
+
 しかし、運勢はランダムに導き出されるものであることから、このままではテストが通らないことがあります。これでは問題なので、常に同じ結果を得る手段がないか考えてみましょう。
 
 #### モック化
@@ -248,7 +325,7 @@ class TestFortuneTelling:
 つまり、処理の結果をアプリケーションで制御できないもの(ランダムなもの・外部API側のエラーなど)をそのまま扱うと、テストコードの動作が非常に不安定になります。
 
 テストフレームワークでは、このような問題を解決するため、`モック化`という仕組みが提供されています。
-`mock`という単語がレプリカをつくるといった意味を持つように、モック化は、アプリケーションで制御できない処理をテストコード用のレプリカに置き換えるといったことを指しています。
+`mock`という単語がレプリカをつくるといった意味を持つように、モック化は、アプリケーションで制御できない処理をテストコード用のレプリカに置き換えることを指しています。
 おみくじの例では、ランダムな運勢を出力する関数を、固定の文字列を返却する関数(レプリカ)で代用することがモック化に相当します。
 
 まとめると、モック化を導入することで、自身の開発しているアプリケーションに閉じた世界でテストができるようになります。
@@ -258,7 +335,7 @@ class TestFortuneTelling:
 #### monkeypatch
 
 本題に戻って、ランダム要素の関わるおみくじ関数をモック化してみましょう。pytestでは、モック化のための仕組みとして、`monkeypatch`というfixtureが提供されています。
-monkeypatch fixtureでモック化することで、特定のモジュールに属する関数の戻り値を固定させることができます。おみくじアプリの例で言い換えれば、おみくじ関数の戻り値を「大吉」といった特定の運勢で固定できるようになります。
+monkeypatch fixtureでモック化することで、特定のモジュールに属する関数の戻り値を固定させることができます。おみくじアプリの例で言い換えれば、おみくじ関数の戻り値を「大吉」などの特定の運勢で固定できるようになります。
 [参考](https://docs.pytest.org/en/6.2.x/monkeypatch.html#simple-example-monkeypatching-functions)
 
 では、具体的にどのようにモック化するのか、テストコードから見てみましょう。
@@ -267,27 +344,28 @@ monkeypatch fixtureでモック化することで、特定のモジュールに�
 ```Python
 # tests/views_test.py
 from pytest import MonkeyPatch
+from fortune_telling import fortune
 # 中略...
+
 class TestFortuneTelling:
     # 中略...
 
     # コンテキストの運勢要素は関数から生成されたか
     # fixtureはテスト関数の引数で受け取る
-    def test_context_fortune(self, monkeypatch: MonkeyPatch):
+    def test_context_fortune(self, monkeypatch: MonkeyPatch, assertion_helper):
         # GIVEN
         client = Client()
         named_url = 'おみくじ:結果'
         context_key_of_fortune = 'fortune'
         expected = '大吉'
-        
-        # fortuneモジュールのtell_fortune属性を、「文字列 '大吉'」を返却する関数でモック化
+        # GIVEN-MOCK
+        # monkeypatch fixtureを利用して関数をモック化
         monkeypatch.setattr(fortune, 'tell_fortune', lambda: expected)
 
         # WHEN
         response = client.get(reverse(named_url))
-        actual = response.context.get(context_key_of_fortune, None)
         # THEN
-        assert actual == expected
+        assertion_helper.assert_context_get(response, context_key_of_fortune, expected)
 ```
 
 関数をモック化しておくことで、安定してテストコードが動作するようになってくれました。
@@ -303,6 +381,14 @@ views_test.py::TestFortuneTelling::test_context_fortune PASSED           [100%]
 
 
 #### 補足: なぜモック化対象の関数を`モジュール名.関数名`の形式で呼び出しているのか
+
+```Python
+# おみくじを引く処理再掲
+fortune = fortune_module.tell_fortune()
+context = {
+    'fortune': fortune
+}
+```
 
 さて、おみくじ関数を呼び出すとき、`モジュール名.関数名`と記述していたかと思います。こんな冗長な書き方をしなくとも、モジュールから関数をimportし、関数名だけで呼び出した方がシンプルです。
 なぜこのような書き方をしているのでしょうか。
@@ -346,4 +432,4 @@ print(fortune.tell_fortune == tell_fortune)
 ## まとめ
 
 Djangoのおみくじアプリでテストコードを書いてきました。テストコードから、テンプレートやコンテキストが期待通りのものか検証する方法を見てきました。
-いずれも、テストクライアントの提供するレスポンスオブジェクトから、シンプルに確かめることができます。
+いずれも、Clientの提供するレスポンスオブジェクトから、シンプルに確かめることができます。
