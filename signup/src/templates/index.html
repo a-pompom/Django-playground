@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+1p:wght@500&display=swap" rel="stylesheet">
+    <title>ユーザ登録</title>
+</head>
+<style>
+    body {
+        font-family: 'M PLUS 1p', sans-serif;
+    }
+</style>
+<body class="overflow-hidden w-full h-screen bg-sky-400">
+<form method="post" action="{% url 'ユーザ登録:登録' %}" class="mx-auto mt-40 w-3/6 h-4/6 bg-white rounded-3xl">
+    <h2 class="pt-24 text-6xl tracking-wider text-center text-slate-500">
+        ユーザ登録
+    </h2>
+
+    {% csrf_token %}
+
+    <input
+        type="text"
+        name="username"
+        placeholder="username"
+        class="block pl-4 mx-auto mt-24 w-7/12 h-16 rounded-xl bg-slate-100"
+    >
+
+    <input
+        type="submit"
+        value="登録"
+        class="block mx-auto mt-16 w-4/12 h-24 text-6xl tracking-wider text-white bg-sky-300 rounded-xl cursor-pointer hover:bg-sky-500"
+    >
+
+</form>
+</body>
+</html>
