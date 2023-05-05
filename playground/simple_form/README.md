@@ -1,7 +1,6 @@
 # 概要
 
 簡単なform/input要素をDjangoで扱えるようにしたい。
-TODO view_formのテストを書きたい。
 
 * 画面へ渡されるformがViewFormのインスタンスか
 * 結果画面へ渡すformオブジェクトへ値が設定されているか
@@ -288,5 +287,10 @@ BoundFieldオブジェクトを介してname属性やFieldオブジェクトに�
 ただし、チェックボックスのように、同一のname属性で複数の値を保持するものはループを通じて各値を取り出す。
 
 
-
 ## Formオブジェクト-バリデーション
+
+TODO テストコードから
+
+[エラーメッセージの上書き](https://docs.djangoproject.com/en/4.0/ref/forms/fields/#error-messages)
+
+[Validators](https://docs.djangoproject.com/en/4.0/ref/validators/)
