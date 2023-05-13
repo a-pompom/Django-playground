@@ -1,5 +1,3 @@
-TODO 126行目から
-
 # 概要
 
 Djangoでユーザ登録アプリをつくってみます。
@@ -205,7 +203,7 @@ from django.db import models
 # Create your models here.
 ```
 
-ModelはPythonのクラスでデータベースのテーブルを表現しています。ですので、ユーザ情報としてユーザ名を属性に持つクラスをModelとしてつくってみることにします。
+ModelはPythonのクラスでデータベースのテーブルを表現しています。ですので、ユーザ名を属性に持つことでユーザ情報を表現するクラスをつくってみることにします。このクラスがModelの役割を担います。
 
 [参考](https://docs.djangoproject.com/en/4.1/topics/db/models/)
 
@@ -497,13 +495,16 @@ TEMPLATES = [
 
 #### form
 
-ユーザ情報をアプリケーションへ送るために、formを定義しています。
-今の段階ではDjangoに特有の要素はないので、ひとまずテンプレートではユーザ名をPOSTリクエストで送るための土台がつくられていることを押さえておきましょう。
+ユーザ情報をアプリケーションへ送るために、form要素を定義しています。
+今の段階ではDjangoに特有の書き方はないので、ひとまずテンプレートではユーザ名をPOSTリクエストで送るための土台がつくられていることを押さえておきましょう。
 
 ### 画面表示
 
 URLから対応するテンプレートにもとづく画面を表示するために、URLconf, viewを組み立てます。
-最初に画面を表現するHTTPレスポンスを返すviewを見ておきます。`render()`により先ほどつくったテンプレートをもとに、HTTPレスポンスを構築しています。
+
+#### view
+
+最初に画面を表現するHTTPレスポンスを返すviewを見ておきます。`render()`により先ほどつくったテンプレートをもとに、HTTPレスポンスを構築しています。`render()`の記法には後ほど触れます。
 
 ```python
 # signup/views.py
@@ -520,7 +521,20 @@ def index(request: HttpRequest) -> HttpResponse:
     return render(request, 'index.html')
 ```
 
-特定のURLへのリクエストからviewの`index()`関数を呼び出すために、対応関係を表現するURLconfを書いていきます。
+#### render()
+
+HTTPレスポンスを組み立てるのに`render()`なる関数を呼び出しました。
+これは、よくある処理を簡単に記述するためにDjangoが用意している機能です。書式から使い方を見ておきましょう。
+
+> 書式: `render(request, template_name, context=None, content_type=None, status=None, using=None)`
+
+[参考](https://docs.djangoproject.com/en/4.2/topics/http/shortcuts/#render)
+
+HTTPResponseクラスのイニシャライザ・`render_to_string()`を組み合わせていた処理が関数1つで書けるようになりました。
+
+#### URLconf
+
+特定のURLへのリクエストからviewのindex関数を呼び出すために、対応関係を表現するURLconfを書いていきます。
 appで定義したviewに対応づけるために、プロジェクト・appそれぞれでURLconfを定義します。
 
 ```python
@@ -675,35 +689,24 @@ MIDDLEWARE = [
 ]
 ```
 
-ミドルウェア`CsrfViewMiddleware`がリクエストを処理する前に呼ばれ、`csrfmiddlewaretoken`を検証しておくことによって、CSRF攻撃で送られた不正なリクエストを防ぐことができます。
+ミドルウェア`CsrfViewMiddleware`は、リクエスト・レスポンスの前後処理に介入し、以下のような処理をしています。
 
-また、ミドルウェア内部ではクッキーを介してPOSTボディの`csrfmiddlewaretoken`を検証することで、リクエストの安全性を保証しています。
-もう少しだけ踏み込むと、クッキーに設定されたCSRFトークンからシークレットと呼ばれる要素を取り出し、`csrfmiddlewaretoken`の値と一致していることをもってリクエストの安全性を保証しています。
-
-![image](https://user-images.githubusercontent.com/43694794/191394415-6fec4805-0527-4dd9-af53-17fdec346a9a.png)
-
-図6: クッキーに設定されたCSRFトークン
-
-
-```HTML
-<input type="hidden" name="csrfmiddlewaretoken" value="0xFQKOgaRCoCW8LiIUdbRkn8FvOeCCb0nqBBLQ9DacCG4yZxAo0ZOSP6SNPyyGae">
-```
-
-クッキーのトークンとPOSTボディに設定されたトークンは異なる値であることが分かります。
-
-[参考](https://docs.djangoproject.com/en/4.1/ref/csrf/)
+* formを含むレスポンスを生成するとき、テンプレートタグ`csrf_token`からCSRFトークンを出力
+* 検証対象となるCSRFトークンをクッキーで保存
+* POSTリクエストを処理するとき、クッキーに保存された値・`csrfmiddlewaretoken`を比較することでリクエストの妥当性を検証
 
 ---
 
 少し補足が長くなりましたが、まとめるとDjangoは以下の流れでリクエストを処理することで、CSRF攻撃を防いでいます。
 
-* POSTリクエストを送るformを含む画面を描画するとき、hiddenのinput要素へ`csrfmiddlewaretoken`を設定
+* POSTリクエストを送るformを含む画面を描画するとき、hidden属性のinput要素へ`csrfmiddlewaretoken`を設定
 * あわせて、画面を返却するレスポンスへCSRFトークンを含むクッキーを追加
 
 * POSTリクエストが送られると、appのviewなどの処理が呼ばれる前に、ミドルウェア`CsrfViewMiddleware`が呼びだされる
-* ミドルウェアでリクエストに設定された`csrfmiddlewaretoken`とクッキーに含まれるトークンが一致しているか検証
-* 一致していれば安全なPOSTリクエストと判定し、処理を継続 一定しなければ不正なリクエストとして403レスポンスを返却
+* ミドルウェアにて、リクエストで設定された`csrfmiddlewaretoken`とクッキーに含まれるトークンが一致しているか検証
+* 一致していれば安全なPOSTリクエストと判定し、処理を継続 一致しなければ不正なリクエストとして403レスポンスを返却
 
+※ ここでは省略しましたが、厳密には`csrfmiddlewaretoken`は容易に推測されないようmaskingと呼ばれる処理にて、クッキーに設定する値とは異なるものへ変換されています。
 
 #### URLconf
 
@@ -766,8 +769,8 @@ POSTリクエストで送られたユーザ名は、requestオブジェクトの
 残りは、リクエストから得られたユーザ名をもとにユーザ情報をデータベースへ登録するだけです。
 短い処理なのでviewに書いてもよいのですが、メンテナンス性やテストコードを書くことを考えて別のモジュールへ切り出すことにします。
 
-モジュールさえ分かれていればよいので、ディレクトリ名・ファイル名にとくに制約はありません。
-ですがなにか1つ決めなければ先に進まないのでここでは、アプリケーションに固有のロジックを`usecase`というディレクトリの`actions.py`へ分離させています。
+モジュールさえ分かれていればよいので、ディレクトリ構成などに制約はありません。
+ですがなにか1つ決めなければ先に進めません。よってここでは、アプリケーションに固有のロジックを`usecase`というディレクトリの`actions.py`へ分離させています。
 上のコードはActionクラスを呼び出し可能オブジェクトとしたことで、ユーザ登録処理をシンプルに呼び出せるようにしています。
 
 ※ モジュールの分け方はあくまでも一例なので、要件や好みに応じて変えてみてください。
@@ -804,17 +807,11 @@ class SaveAction:
 #### Modelオブジェクト生成
 
 Modelクラスは自身がデータベースのテーブルを・インスタンスがテーブルのレコードを指しています。
-つまり、User Modelのインスタンスをつくることで、データベースのテーブルへ登録したいレコードを表現するオブジェクトができあがります。
+よって、User Modelのインスタンスをつくることで、データベースのテーブルへ登録したいレコードを表現するオブジェクトができあがります。
 
 [参考](https://docs.djangoproject.com/en/4.1/topics/db/queries/#creating-objects)
 
 イニシャライザにはキーワード引数で各カラムを表すField名を指定することで、カラムの値を設定することができます。
-
-```python
-user = User(username='Bob')
-```
-
-上の処理では、ユーザ名(usernameカラム)を`Bob`とするユーザ情報を新しくつくっています。
 
 #### 登録
 
@@ -842,12 +839,11 @@ Modelクラスには、データベースへクエリを発行するための便
 登録後の画面として、ユーザ登録結果画面をつくります。
 ユーザ情報をデータベースへ登録できたところで満足してもよいですが、もう少しModelと仲良くなることを目指してみます。具体的には、Modelを介してデータベースからユーザ情報を取得し、画面に表示できるようにします。
 
-### 単純な画面表示
+### テンプレート
 
-一気にすべての機能をつくると迷子になってしまうので、一歩ずつ組み上げていきます。
-ということで、登録結果として表示する画面から始めます。まずは単純に画面遷移を繋げたいので、ユーザ情報を含まない固定の文字列だけを表示することにします。
+最初に全体像を掴むために、テンプレートを見ておきます。ユーザ名を画面に表示しているだけなので、これまでの知識で問題なく理解できるはずです。
 
-```HTML
+```html
 <!-- templates/result.html -->
 <!DOCTYPE html>
 <head>
@@ -868,98 +864,79 @@ Modelクラスには、データベースへクエリを発行するための便
 <div class="grid place-content-center mx-auto mt-40 w-3/6 h-4/6 bg-white rounded-3xl">
 
     <h2 class="text-6xl tracking-wider text-center text-slate-500">
-        登録完了
+        ようこそ、{{ user.username }}さん
     </h2>
 </div>
 </body>
 </html>
 ```
 
-ユーザ登録処理が終わったあとに表示する画面を今回新しくつくった画面とします。
+肝となるのは、ユーザ名を表示している処理`{{ user.username }}`です。
+`user`はUser Modelを表しており、`.`による属性アクセスからカラムの値を参照できます。
+つまり、User Modelをコンテキストに上記テンプレートからレスポンスを組み立てる処理をつくれば、ユーザ登録画面を実現できそうです。
+
+以降では、登録されたユーザ情報をデータベースから読み出す処理をつくっていきます。
+
+### action
+
+```
+
+```python
+# signup/usecase/action.py
+from typing import TypedDict
+from ..models import User
+
+class TypeContext(TypedDict):
+    """ ユーザ登録結果画面のコンテキストを表現することを責務に持つ """
+    user: User
+
+
+class ResultViewAction:
+    """ ユーザ登録結果画面のコンテキストを組み立てることを責務に持つ """
+
+    def __call__(self, user_id: int) -> TypeContext:
+        """
+        ユーザ情報をコンテキストとして組み立て
+        :param user_id 表示対象ユーザID
+        :return ユーザ情報を含むコンテキスト
+        """
+        user = User.objects.get(id=user_id)
+
+        return {
+            'user': user
+        }
+```
+
+### view
 
 ```python
 # signup/views.py
-def save(request: HttpRequest) -> HttpResponse:
+def result(request: HttpRequest, user_id: int) -> HttpResponse:
     """
-    ユーザ登録処理
+    ユーザ登録結果画面
     :param request: HTTPリクエスト
-    :return: ユーザ登録結果画面のテンプレートから組み立てられたHTTPレスポンス
+    :param user_id: 表示対象ユーザの識別子
+    :return: ユーザ登録結果画面を表現するHTTPレスポンス
     """
-    user = SaveAction()(request.POST['username'])
-
-    # 変更
-    # ユーザ登録結果画面を表示
-    return render(request, 'result.html')
+    return render(request, 'result.html', context=ResultViewAction()(user_id))
 ```
 
-もう一度ユーザ登録画面からPOSTリクエストを送ると、ユーザ登録結果画面が表示されるはずです。
+### URLconf
 
-![image](https://user-images.githubusercontent.com/43694794/192523941-2b8f35cd-5927-4215-b41b-5cb18c6a3a9f.png)
+```python
+from django.urls import path
 
-図9: ユーザ登録結果画面
+from .views import index, save, result
 
----
+app_name = 'ユーザ登録'
 
-### 画面遷移の問題
+urlpatterns = [
+    path('', index, name='トップ'),
+    path('save', save, name='登録'),
 
-ユーザ登録結果画面でユーザ名を表示する前に解決しなければならない問題があります。
-言葉だけではイメージしづらい動きなので、実際に動かして見てみます。
-
-![image](https://user-images.githubusercontent.com/43694794/192523874-aed338c0-b900-4945-a87f-d34587935b40.png)
-
-図10: ユーザ登録画面
-
-ユーザ登録画面からPOSTリクエストを送ってユーザ情報をデータベースへ登録します。
-そして、ユーザ登録処理が返却するHTTPレスポンスから、ユーザ登録結果画面が表示されます。
-
-![image](https://user-images.githubusercontent.com/43694794/192523941-2b8f35cd-5927-4215-b41b-5cb18c6a3a9f.png)
-
-図11: ユーザ登録結果画面
-
-ここで、よくある操作として画面をリロードしてみます。
-
-![image](https://user-images.githubusercontent.com/43694794/192523977-b3ea6f26-371d-4528-a257-9bc9f8d3c31d.png)
-
-図12: ユーザ登録結果画面でリロード
-
-リロードすると、再びユーザ登録結果画面が表示されました。画面上は問題なさそうですが、データベースを見てみると意図しない状態がつくられています。
-
-![image](https://user-images.githubusercontent.com/43694794/192524058-54dc4ef3-ddd0-4374-8a62-8c2af179b5b4.png)
-
-図13: 登録後のデータベースの状態
-
-同じレコードがつくられてしまいました。なぜこのような結果となったのでしょうか。
-Djangoは開発サーバを起動しているとき、受け取ったHTTPリクエストのメソッド・パスをコンソールへ出力してくれます。これを見てみると、ユーザ登録を表現するPOSTリクエストが2回続けて送られたことが分かりました。
-
-```bash
-# 中略...
-"POST /signup/save HTTP/1.1" 200 845
-"POST /signup/save HTTP/1.1" 200 845
+    path('result/<int:user_id>', result, name='登録結果'),
+]
 ```
-
-1回目は登録ボタンを押したときに・2回目はリロードしたときにPOSTリクエストが発火しています。
-
----
-
-POSTリクエストのハンドラが返すHTTPレスポンスでそのまま画面を表示すると、問題となることが分かりました。
-具体的には、リロードや戻る/進むなどの操作からPOSTリクエストが繰り返し送信されてしまいます。すると、同じ商品が意図せず何度も購入される・画面を更新するだけで変更が上書きされるなど、予期しない動作を招く可能性があります。
-
-#### PRG(Post/Redirect/Get)パターン
-
-TODO なぜリダイレクトでPOSTリクエストが戻るボタンの遷移先から消えたのか明らかにしたい
-
-→リダイレクトしたリクエストは変わる可能性があり安定しないので、一貫性を保つためにブラウザが排除しているっぽい
-
-[参考](https://wiki.mozilla.org/Browser_History:Redirects#History_View)
-
-
-TODO
-
-先に愚直に完了画面をつくる。ここでは、登録完了のような文字列のみ表示。
-その後、リロードで二重に登録する例を見せる。
-これを解決するためにPRGパターンを導入。
-ユーザ名を表示するためにデータベースからユーザ情報を取得。
-
 
 
 ### ユーザ情報取得
@@ -986,64 +963,3 @@ class User(models.Model):
 ### ユーザ情報表示
 
 ## まとめ
-
-
-Djangoでユーザ登録アプリをつくりたい。
-
-https://docs.djangoproject.com/en/4.0/topics/db/models/#models-across-files
-
-TODO データベース操作(レコード挿入)はfixtureをimportして実現できるか試したい
-
-おみくじとの差分
-* Modelを新しくつくる(makemigration, migrate)
-* ユーザModelはメールアドレス + ユーザ名
-* Modelを操作(表示・登録)
-* POSTボディを参照するようになった
-
-```python
-INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-]
-```
-
-```bash
-$ python manage.py migrate
-Operations to perform:
-  Apply all migrations: admin, auth, contenttypes, sessions
-Running migrations:
-  Applying contenttypes.0001_initial... OK
-  Applying auth.0001_initial... OK
-  Applying admin.0001_initial... OK
-  Applying admin.0002_logentry_remove_auto_add... OK
-  Applying admin.0003_logentry_add_action_flag_choices... OK
-  Applying contenttypes.0002_remove_content_type_name... OK
-  Applying auth.0002_alter_permission_name_max_length... OK
-  Applying auth.0003_alter_user_email_max_length... OK
-  Applying auth.0004_alter_user_username_opts... OK
-  Applying auth.0005_alter_user_last_login_null... OK
-  Applying auth.0006_require_contenttypes_0002... OK
-  Applying auth.0007_alter_validators_add_error_messages... OK
-  Applying auth.0008_alter_user_username_max_length... OK
-  Applying auth.0009_alter_user_last_name_max_length... OK
-  Applying auth.0010_alter_group_name_max_length... OK
-  Applying auth.0011_update_proxy_permissions... OK
-  Applying auth.0012_alter_user_first_name_max_length... OK
-  Applying sessions.0001_initial... OK
-
-```
-
-ユーザModelの登録
-
-
-```bash
-$ python manage.py migrate
-Operations to perform:
-  Apply all migrations: admin, auth, contenttypes, sessions, signup
-Running migrations:
-  Applying signup.0001_initial... OK
-```
