@@ -1,3 +1,5 @@
+TODO: URLconfから
+
 # 概要
 
 Djangoでユーザ登録アプリをつくってみます。
@@ -879,7 +881,8 @@ Modelクラスには、データベースへクエリを発行するための便
 
 ### action
 
-```
+まずは、実際にデータベースへアクセスし、ユーザ情報を取り出す処理であるactionを見ていきます。
+ここでは、User Modelがどのようにデータベースから取り出されるのか、理解することを目指します。
 
 ```python
 # signup/usecase/action.py
@@ -907,7 +910,59 @@ class ResultViewAction:
         }
 ```
 
+Djangoはviewを組み立てるとき、変数をコンテキストと呼ばれる辞書から参照します。
+ですので、ここでは戻り値の型をユーザ情報を値に持つ辞書で表しています。
+
+今回重要なのは、User Modelを介してユーザ情報を読み出している処理です。中身を読み解いていきましょう。
+
+#### Manager
+
+`.`が続いている処理は、それぞれが何を指しているのか理解するのが重要です。分解してみます。
+
+```python
+# Manager型
+manager = User.objects
+user_model = manager.get(id='some_id')
+```
+
+`Model.objects`フィールドには、Managerと呼ばれるオブジェクトが設定されます。
+ManagerはアプリケーションとDBの橋渡し役を担っています。Modelを介してDBにアクセスするときは、Managerオブジェクトを介することを覚えておきましょう。
+
+[参考](https://docs.djangoproject.com/en/4.2/topics/db/queries/#retrieving-objects)
+
+#### get()
+
+[参考](https://docs.djangoproject.com/en/4.2/ref/models/querysets/#django.db.models.query.QuerySet.get)
+
+> 書式: `get(*args, **kwargs)`
+
+条件に合致するレコードをデータベースから読み出し、Modelオブジェクトを返却します。
+引数にもさまざまな記法がありますが、ここではシンプルな等価比較を表現するキーワード引数で記述します。
+※ 厳密には、`get()`はQuerySetと呼ばれるオブジェクトのメソッドです。
+
+ここまでをまとめると、`User.objects.get(id='some_id')`の処理は、データベースへアクセスするためのインタフェースを`Model.objects`フィールドから取得します。
+そして、`get()`による問い合わせにてデータベースからidカラムが引数と合致するレコードを抽出します。抽出された結果は、User Modelへ変換され、戻り値として返されます。
+つまり、1行の記述からDjanoがDBアクセス・User Modelへの変換までまとめてよしなにやってくれました。
+
+#### 補足: Managerの役割を掘り下げたい
+
+Managerという名前・橋渡しの役目だけでは、いまいちなぜ必要なのかが見えてきません。もう少しだけ掘り下げておきましょう。
+
+まず、Managerがあることで、データベースへのクエリをより柔軟に書けるようになります。個々のクエリを発行するときに前処理を挟むようなイメージです。
+これは概念だけ押さえておけばよいと思います。
+
+[参考](https://docs.djangoproject.com/en/4.2/topics/db/managers/#modifying-a-manager-s-initial-queryset)
+
+そして、ManagerはDjangoにおいてデータベースへのクエリを表現する、QuerySetなるオブジェクトを提供します。
+アプリケーションはQuerySetを介してデータベースを操作するので、QuerySetを提供するManagerは、まさに相互を仲介する橋渡し役であると言えます。
+※ QuerySetの詳細は後の例で触れていきます。
+
 ### view
+
+リクエストのハンドラであるviewをつくります。
+単にactionを呼び出してテンプレートからレスポンスを組み立てているシンプルな処理です。
+
+引数の`user_id`がどのように渡されるのかは、URLconfにて探っていきます。
 
 ```python
 # signup/views.py
