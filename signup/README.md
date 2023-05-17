@@ -1,4 +1,4 @@
-TODO: URLconfから
+TODO: ユーザ登録結果画面の文章推敲
 
 # 概要
 
@@ -840,6 +840,7 @@ Modelクラスには、データベースへクエリを発行するための便
 
 登録後の画面として、ユーザ登録結果画面をつくります。
 ユーザ情報をデータベースへ登録できたところで満足してもよいですが、もう少しModelと仲良くなることを目指してみます。具体的には、Modelを介してデータベースからユーザ情報を取得し、画面に表示できるようにします。
+画面に表示する対象のユーザ情報は、パスに指定したID要素から識別します。例えば、`/result/42`のようなURLから、IDが42のユーザ情報を取得します。
 
 ### テンプレート
 
@@ -928,11 +929,11 @@ user_model = manager.get(id='some_id')
 `Model.objects`フィールドには、Managerと呼ばれるオブジェクトが設定されます。
 ManagerはアプリケーションとDBの橋渡し役を担っています。Modelを介してDBにアクセスするときは、Managerオブジェクトを介することを覚えておきましょう。
 
-[参考](https://docs.djangoproject.com/en/4.2/topics/db/queries/#retrieving-objects)
+[参考](https://docs.djangoproject.com/en/4.1/topics/db/queries/#retrieving-objects)
 
 #### get()
 
-[参考](https://docs.djangoproject.com/en/4.2/ref/models/querysets/#django.db.models.query.QuerySet.get)
+[参考](https://docs.djangoproject.com/en/4.1/ref/models/querysets/#django.db.models.query.QuerySet.get)
 
 > 書式: `get(*args, **kwargs)`
 
@@ -942,16 +943,16 @@ ManagerはアプリケーションとDBの橋渡し役を担っています。Mo
 
 ここまでをまとめると、`User.objects.get(id='some_id')`の処理は、データベースへアクセスするためのインタフェースを`Model.objects`フィールドから取得します。
 そして、`get()`による問い合わせにてデータベースからidカラムが引数と合致するレコードを抽出します。抽出された結果は、User Modelへ変換され、戻り値として返されます。
-つまり、1行の記述からDjanoがDBアクセス・User Modelへの変換までまとめてよしなにやってくれました。
+つまり、1行の記述からDjangoがDBアクセス・User Modelへの変換までまとめてよしなにやってくれました。
 
 #### 補足: Managerの役割を掘り下げたい
 
-Managerという名前・橋渡しの役目だけでは、いまいちなぜ必要なのかが見えてきません。もう少しだけ掘り下げておきましょう。
+Managerという名前・橋渡しの役目だけでは、いまいちなぜ必要なのかが見えてきません。理解を深めるためにもう少しだけ掘り下げておきましょう。
 
 まず、Managerがあることで、データベースへのクエリをより柔軟に書けるようになります。個々のクエリを発行するときに前処理を挟むようなイメージです。
 これは概念だけ押さえておけばよいと思います。
 
-[参考](https://docs.djangoproject.com/en/4.2/topics/db/managers/#modifying-a-manager-s-initial-queryset)
+[参考](https://docs.djangoproject.com/en/4.1/topics/db/managers/#modifying-a-manager-s-initial-queryset)
 
 そして、ManagerはDjangoにおいてデータベースへのクエリを表現する、QuerySetなるオブジェクトを提供します。
 アプリケーションはQuerySetを介してデータベースを操作するので、QuerySetを提供するManagerは、まさに相互を仲介する橋渡し役であると言えます。
@@ -978,6 +979,9 @@ def result(request: HttpRequest, user_id: int) -> HttpResponse:
 
 ### URLconf
 
+URLconfへリクエストのハンドラであるview関数を登録します。
+このとき、view関数がパスを介してユーザIDを受け取れるよう、少し設定を書き加えます。まずは実際のURLconfを見てみましょう。
+
 ```python
 from django.urls import path
 
@@ -993,8 +997,28 @@ urlpatterns = [
 ]
 ```
 
+パス`result/`と対応するpath関数の第一引数に見慣れない記法が指定されています。
+このように、URL要素に`<型:引数名>`の形式の記法を指定することで、パスに指定された値をviewへ渡すことができます。
 
-### ユーザ情報取得
+[参考](https://docs.djangoproject.com/en/4.1/topics/http/urls/#example)
+
+※ 公式ではURLconfのサンプルを示すときに補足程度にのみ言及しています。
+
+#### Path Converter
+
+上で見た記法は正式にはPath Converterと呼ばれています。URLのパス部分に指定された文字列を別の形式へ変換することに由来しているようです。
+`<int:user_id>`と指定することで、ハンドラとなる関数では、`user_id`という引数名でint型の値を受け取れるようになります。
+
+```python
+# ユーザ登録結果画面を表示するview関数
+def result(request: HttpRequest, user_id: int) -> HttpResponse:
+```
+
+[参考](https://docs.djangoproject.com/en/4.1/topics/http/urls/#path-converters)
+
+---
+
+以上でユーザ情報を表示するための準備が整いました。
 
 #### 補足: なぜModelではFieldをインスタンス属性ではなくクラス属性で定義したのか
 
